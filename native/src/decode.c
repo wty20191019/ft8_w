@@ -399,9 +399,11 @@ static bool osd_accept_cb(const uint8_t* plain174, void* vctx)
     return true;
 }
 
-bool ftx_decode_candidate_osd(const ftx_waterfall_t* wf, const ftx_candidate_t* cand,
-                              int max_iterations, int osd_depth,
-                              ftx_message_t* message, ftx_decode_status_t* status)
+bool ftx_decode_candidate_ex(const ftx_waterfall_t* wf, const ftx_candidate_t* cand,
+                             int max_iterations, int osd_depth,
+                             ftx_refine_llr_fn refine, void* refine_ctx,
+                             int refine_min_errors,
+                             ftx_message_t* message, ftx_decode_status_t* status)
 {
     float log174[FTX_LDPC_N]; // message bits encoded as likelihood
     if (wf->protocol == FTX_PROTOCOL_FT4)
@@ -424,10 +426,10 @@ bool ftx_decode_candidate_osd(const ftx_waterfall_t* wf, const ftx_candidate_t* 
         {
             return true;
         }
-        // BP 收敛到某合法码字但 CRC 不匹配：继续用 OSD 搜索其它码字
+        // BP 收敛到某合法码字但 CRC 不匹配：继续尝试后续步骤
     }
 
-    // BP 未成功：在候选质量可接受时用 OSD 兜底
+    // OSD 兜底（与旧路径完全一致，先跑，保证已成功结果不变）
     if (osd_depth > 0 && status->ldpc_errors <= FT8_OSD_MAX_BP_ERRORS &&
         cand->score >= FT8_OSD_MIN_SCORE)
     {
@@ -441,7 +443,45 @@ bool ftx_decode_candidate_osd(const ftx_waterfall_t* wf, const ftx_candidate_t* 
         }
     }
 
+    // P2.3（加性）：BP/OSD 均未成功时，用时域精化 LLR 再试 BP + OSD。
+    // 放在最后，不影响上面瀑布域路径的任何既有结果，故召回只增不减。
+    if (refine && wf->protocol == FTX_PROTOCOL_FT8 &&
+        status->ldpc_errors <= refine_min_errors &&
+        cand->score >= FT8_OSD_MIN_SCORE)
+    {
+        float refined[FTX_LDPC_N];
+        if (refine(refine_ctx, cand, refined) == 0)
+        {
+            ftx_normalize_logl(refined);
+            bp_decode(refined, max_iterations, plain174, &status->ldpc_errors);
+            if (status->ldpc_errors == 0 && finish_candidate(wf, plain174, message, status))
+            {
+                return true;
+            }
+            if (osd_depth > 0 && status->ldpc_errors <= FT8_OSD_MAX_BP_ERRORS &&
+                cand->score >= FT8_OSD_MIN_SCORE)
+            {
+                osd_accept_ctx_t ctx2;
+                ctx2.wf = wf;
+                ctx2.message = message;
+                ctx2.status = status;
+                if (ft8_osd_decode(refined, osd_depth, FT8_OSD_MAX_HARD, osd_accept_cb, &ctx2))
+                {
+                    return true;
+                }
+            }
+        }
+    }
+
     return false;
+}
+
+bool ftx_decode_candidate_osd(const ftx_waterfall_t* wf, const ftx_candidate_t* cand,
+                              int max_iterations, int osd_depth,
+                              ftx_message_t* message, ftx_decode_status_t* status)
+{
+    return ftx_decode_candidate_ex(wf, cand, max_iterations, osd_depth,
+                                   NULL, NULL, 0, message, status);
 }
 
 bool ftx_decode_candidate(const ftx_waterfall_t* wf, const ftx_candidate_t* cand, int max_iterations, ftx_message_t* message, ftx_decode_status_t* status)

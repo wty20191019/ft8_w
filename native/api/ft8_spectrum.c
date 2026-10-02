@@ -420,3 +420,142 @@ float ft8_spectrum_snr(const float* samples, int num_samples, int sample_rate,
     return (float)snr;
 #endif
 }
+
+/* ---- P2.3：解码前时域精化 LLR ---------------------------------------- *
+ * BP 失败候选不知道数据音调，故只能用**已知的 Costas 同步音调**做小范围
+ * 时间/频率精化；随后在精化位置上对 58 个数据符号做 1 符号窗 8 音调
+ * Goertzel，按与 ft8_extract_symbol 相同的 Gray/max4 组合得到 174 个 LLR。
+ * 量纲取功率 dB，与瀑布域 WF_ELEM_MAG 一致（归一化会消除绝对尺度）。 */
+
+/* 单音 Goertzel 功率（越界样本按 0）。 */
+static double sp_tone_power(const float* x, int num_samples, long base, int n,
+                            double freq, int sample_rate)
+{
+    const double w = 2.0 * M_PI * freq / (double)sample_rate;
+    const double coeff = 2.0 * cos(w);
+    double s1 = 0.0, s2 = 0.0;
+    for (int i = 0; i < n; ++i)
+    {
+        const long pos = base + i;
+        const double v = (pos >= 0 && pos < num_samples) ? (double)x[pos] : 0.0;
+        const double s0 = v + coeff * s1 - s2;
+        s2 = s1;
+        s1 = s0;
+    }
+    const double p = s1 * s1 + s2 * s2 - coeff * s1 * s2;
+    return (p > 0.0) ? p : 0.0;
+}
+
+static float sp_max4(float a, float b, float c, float d)
+{
+    float m = a;
+    if (b > m)
+        m = b;
+    if (c > m)
+        m = c;
+    if (d > m)
+        m = d;
+    return m;
+}
+
+int ft8_spectrum_llr(const float* samples, int num_samples, int sample_rate,
+                     float freq0, float dt, float* log174)
+{
+    if (!samples || !log174 || num_samples <= 0 || sample_rate <= 0 || freq0 < 0.0f)
+        return -1;
+
+    const int nsps = (int)(sample_rate * FT8_SYMBOL_PERIOD + 0.5f);
+    if (nsps < FT8_SP_TONES)
+        return -1;
+
+    /* Costas 同步位置：3 组 × 7 符号（音调已知） */
+    int cpos[FT8_NUM_SYNC * FT8_LENGTH_SYNC];
+    int ctone[FT8_NUM_SYNC * FT8_LENGTH_SYNC];
+    int nc = 0;
+    for (int g = 0; g < FT8_NUM_SYNC; ++g)
+        for (int k = 0; k < FT8_LENGTH_SYNC; ++k)
+        {
+            cpos[nc] = g * FT8_SYNC_OFFSET + k;
+            ctone[nc] = kFT8_Costas_pattern[k];
+            ++nc;
+        }
+
+    long n0 = (long)lround((double)dt * sample_rate);
+    double freq = (double)freq0;
+
+    /* 频率精化：±2 Hz，步长 0.25 Hz，最大化 Costas 音调总功率 */
+    {
+        double best_pw = -1.0;
+        double best_df = 0.0;
+        for (int q = -8; q <= 8; ++q)
+        {
+            const double df = q * 0.25;
+            double pw = 0.0;
+            for (int c = 0; c < nc; ++c)
+                pw += sp_tone_power(samples, num_samples, n0 + (long)cpos[c] * nsps, nsps,
+                                    (double)freq0 + df + (double)ctone[c] * FT8_SP_TONE_SPACING,
+                                    sample_rate);
+            if (pw > best_pw)
+            {
+                best_pw = pw;
+                best_df = df;
+            }
+        }
+        freq = (double)freq0 + best_df;
+    }
+
+    /* 时间精化：±(nsps/8) 样本，步长 4，最大化 Costas 音调总功率 */
+    {
+        const int half = nsps / 8;
+        long best_sh = 0;
+        double best_pw = -1.0;
+        for (int sh = -half; sh <= half; sh += 4)
+        {
+            double pw = 0.0;
+            for (int c = 0; c < nc; ++c)
+                pw += sp_tone_power(samples, num_samples, n0 + sh + (long)cpos[c] * nsps, nsps,
+                                    freq + (double)ctone[c] * FT8_SP_TONE_SPACING, sample_rate);
+            if (pw > best_pw)
+            {
+                best_pw = pw;
+                best_sh = sh;
+            }
+        }
+        n0 += best_sh;
+    }
+
+    /* 对 58 个数据符号做 8 音调功率 → 功率 dB → Gray/max4 → 3 LLR */
+    float* buf = (float*)malloc((size_t)nsps * sizeof(float));
+    if (!buf)
+        return -1;
+
+    for (int k = 0; k < FT8_ND; ++k)
+    {
+        const int sym = k + ((k < 29) ? 7 : 14);
+        const long base = n0 + (long)sym * nsps;
+        for (int i = 0; i < nsps; ++i)
+        {
+            const long pos = base + i;
+            buf[i] = (pos >= 0 && pos < num_samples) ? samples[pos] : 0.0f;
+        }
+
+        float p8[FT8_SP_TONES];
+        tone_powers(buf, nsps, freq, sample_rate, p8);
+
+        /* 功率 → 功率 dB（与瀑布 WF_ELEM_MAG 同量纲） */
+        float s2[8];
+        for (int j = 0; j < 8; ++j)
+        {
+            const float p = p8[kFT8_Gray_map[j]];
+            s2[j] = 10.0f * log10f((p > 1e-30f) ? p : 1e-30f);
+        }
+
+        float* ll = log174 + 3 * k;
+        ll[0] = sp_max4(s2[4], s2[5], s2[6], s2[7]) - sp_max4(s2[0], s2[1], s2[2], s2[3]);
+        ll[1] = sp_max4(s2[2], s2[3], s2[6], s2[7]) - sp_max4(s2[0], s2[1], s2[4], s2[5]);
+        ll[2] = sp_max4(s2[1], s2[3], s2[5], s2[7]) - sp_max4(s2[0], s2[2], s2[4], s2[6]);
+    }
+
+    free(buf);
+    return 0;
+}

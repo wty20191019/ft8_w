@@ -123,6 +123,11 @@ static bool parse_option(int argc, char** argv, int* i, options_t* o)
         o->dec.enable_subtract = true;
         return true;
     }
+    if (strcmp(a, "--llr-refine") == 0)
+    {
+        o->dec.enable_llr_refine = true;
+        return true;
+    }
     return false;
 }
 

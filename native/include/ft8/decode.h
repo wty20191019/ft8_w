@@ -98,6 +98,22 @@ bool ftx_decode_candidate_osd(const ftx_waterfall_t* power, const ftx_candidate_
                               int max_iterations, int osd_depth,
                               ftx_message_t* message, ftx_decode_status_t* status);
 
+/// P2.3：时域精化 LLR 回调。根据候选粗位置重算 174 个 LLR（正 => 比特 1）。
+/// 返回 0 表示成功填充 log174；非 0 表示放弃，调用方仍可用瀑布域 LLR。
+typedef int (*ftx_refine_llr_fn)(void* ctx, const ftx_candidate_t* cand, float* log174);
+
+/// 带「选择性 LLR 重解」的候选解码（FT8）。
+/// 级联：瀑布 LLR→BP；失败且满足门限时用 refine 回调重算 LLR→再 BP；
+/// 仍未成功则用（优先精化后的）LLR 跑 OSD。
+/// @param[in] refine            精化回调；NULL 时行为等价于 ftx_decode_candidate_osd()
+/// @param[in] refine_ctx        回调上下文
+/// @param[in] refine_min_errors 仅当 BP 残余错误数 ≤ 此值时才调用 refine
+bool ftx_decode_candidate_ex(const ftx_waterfall_t* power, const ftx_candidate_t* cand,
+                             int max_iterations, int osd_depth,
+                             ftx_refine_llr_fn refine, void* refine_ctx,
+                             int refine_min_errors,
+                             ftx_message_t* message, ftx_decode_status_t* status);
+
 /// 估计候选信号的“原始信噪比指标”（未做绝对标定），思路参考 JTDX：
 /// 对 79 个符号逐个比较“解码音调功率”与“其余 7 个音调的平均功率”，
 /// 返回 10*log10(mean(P_sig/P_noise) - 1)，单位 dB。

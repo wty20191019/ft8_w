@@ -85,6 +85,7 @@ typedef struct
 
     /* --- P2 新增（追加于末尾，保持既有字段偏移/ JNI 兼容） --- */
     int   osd_depth;           /**< OSD 兜底译码阶数：0=关闭，1..3=翻转深度；默认 2 */
+    bool  enable_llr_refine;   /**< P2.3：BP 失败候选用时域精化 LLR 重解；默认 false */
 } ft8_decode_config_t;
 
 /** 用默认值填充解码配置。 */

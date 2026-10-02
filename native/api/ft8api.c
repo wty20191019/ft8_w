@@ -91,6 +91,7 @@ void ft8_decode_config_default(ft8_decode_config_t* cfg)
     cfg->num_threads = 1;
     cfg->return_duplicates = false;
     cfg->osd_depth = 2; /**< 默认启用 OSD 2 阶（历史数据：+14 命中 / extra 3.3%） */
+    cfg->enable_llr_refine = false; /**< P2.3 实验项，默认关闭 */
 }
 
 void ft8_encode_config_default(ft8_encode_config_t* cfg)
@@ -291,6 +292,7 @@ typedef struct
     int end;
     int ldpc_iterations;
     int osd_depth;
+    int enable_llr_refine; /**< P2.3：BP 失败候选用时域精化 LLR 重解 */
     raw_decode_t* out;
     int count;
 } decode_worker_arg_t;
@@ -401,9 +403,49 @@ static void compute_snr_batch(pass_hit_t* hits, const int* idx, int n,
     ft8_mutex_free(ctx.lock);
 }
 
+/* P2.3：选择性 LLR 重解 */
+#define FT8_LLR_REFINE_MIN_ERRORS 12 /**< BP 残余错误数门限（与 OSD 一致） */
+#define FT8_LLR_REFINE_BUDGET 12     /**< 每个 worker 每次 decode_pass 的精化次数上限 */
+
+/* 精化回调上下文：候选的物理 freq/dt 由 monitor 参数与瀑布 osr 换算。 */
+typedef struct
+{
+    const monitor_t* mon;
+    const ftx_waterfall_t* wf;
+    const float* samples;
+    int num_samples;
+    int sample_rate;
+    int budget; /**< 本 worker 剩余精化次数（限制总成本） */
+} llr_refine_ctx_t;
+
+static int llr_refine_cb(void* vctx, const ftx_candidate_t* cand, float* log174)
+{
+    llr_refine_ctx_t* c = (llr_refine_ctx_t*)vctx;
+    if (c->budget <= 0)
+        return -1; /* 超出预算：放弃精化，上层退回瀑布域结果 */
+    --c->budget;
+    const float freq0 = (c->mon->min_bin + cand->freq_offset +
+                         (float)cand->freq_sub / c->wf->freq_osr) / c->mon->symbol_period;
+    const float dt = (cand->time_offset +
+                      (float)cand->time_sub / c->wf->time_osr) * c->mon->symbol_period;
+    return ft8_spectrum_llr(c->samples, c->num_samples, c->sample_rate, freq0, dt, log174);
+}
+
 static void decode_worker(void* arg)
 {
     decode_worker_arg_t* w = (decode_worker_arg_t*)arg;
+
+    /* P2.3：选择性 LLR 重解上下文（候选物理 freq/dt 由 monitor 换算） */
+    llr_refine_ctx_t rctx;
+    rctx.mon = w->mon;
+    rctx.wf = w->wf;
+    rctx.samples = w->samples;
+    rctx.num_samples = w->num_samples;
+    rctx.sample_rate = w->sample_rate;
+    rctx.budget = FT8_LLR_REFINE_BUDGET;
+    const bool use_refine = w->enable_llr_refine && w->samples && w->num_samples > 0 &&
+                            w->sample_rate > 0;
+
     for (int i = w->start; i < w->end; ++i)
     {
         const ftx_candidate_t* cand = &w->cands[i];
@@ -411,8 +453,11 @@ static void decode_worker(void* arg)
         ftx_decode_status_t status;
         ftx_message_init(&message);
         memset(&status, 0, sizeof(status));
-        if (!ftx_decode_candidate_osd(w->wf, cand, w->ldpc_iterations, w->osd_depth,
-                                      &message, &status))
+        if (!ftx_decode_candidate_ex(w->wf, cand, w->ldpc_iterations, w->osd_depth,
+                                     use_refine ? llr_refine_cb : NULL,
+                                     use_refine ? &rctx : NULL,
+                                     FT8_LLR_REFINE_MIN_ERRORS,
+                                     &message, &status))
             continue;
 
         raw_decode_t* r = &w->out[w->count++];
@@ -500,6 +545,7 @@ static int decode_pass(const monitor_t* mon, const float* samples, int num_sampl
         args[t].end = (num_cand * (t + 1)) / num_threads;
         args[t].ldpc_iterations = iters;
         args[t].osd_depth = cfg->osd_depth;
+        args[t].enable_llr_refine = cfg->enable_llr_refine;
         args[t].out = regions + (size_t)t * num_cand;
         args[t].count = 0;
     }

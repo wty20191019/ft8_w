@@ -17,8 +17,10 @@ native/
 ├── api/
 │   ├── ft8api.c            # ★ 公共 API 实现（编解码调度、多线程、会话、多遍消除驱动）
 │   ├── ft8_gfsk.h/.c       # GFSK 脉冲与复相位参考（编码/相减共用）
+│   ├── ft8_align.h/.c      # P2.3：公共精细对齐（相关/频偏估计/粗-细搜索原语）
 │   ├── ft8_subtract.h/.c   # P1：时域重合成信号消除
 │   ├── ft8_osd.h/.c        # P2.1：OSD 兜底译码（BP 失败候选）
+│   ├── ft8_spectrum.h/.c   # P2.2/P2.3：逐符号频谱 SNR（噪声底）与精化 LLR
 │   ├── ft8_thread.h/.c     # 线程/互斥量抽象（pthread / Win32）
 │   └── ft8_hash.h/.c       # 呼号哈希表
 ├── jni/
@@ -50,7 +52,8 @@ ft8_cli bench test --threads 4 --repeat 3
 ```
 
 常用选项：`--threads N`、`--time-osr N`、`--freq-osr N`、`--min-score N`、
-`--iters N`、`--candidates N`、`--fmin/--fmax HZ`、`--depth N`、`--osd N`、`--subtract`。
+`--iters N`、`--candidates N`、`--fmin/--fmax HZ`、`--depth N`、`--osd N`、`--subtract`、
+`--llr-refine`。
 
 > `--osd N` 为 OSD 兜底译码阶数（0=关闭，1..3；**默认 2**），详见 `docs/04-P2-解码深度设计.md` §4.7。
 
@@ -105,5 +108,7 @@ android {
   P95 ≈ 234 ms；修复接受语义缺陷，消除幻影解码。详见 `docs/04` §4.7、`docs/02` §7.4。
 - ✅ P2.2 逐符号频谱 SNR（WSJT-X 同源频谱噪声底口径）：解码文本不变（命中 1062、Recall 81.8%），
   对 WSJT-X 参考 R²=0.791、MAE≈3.5 dB（噪声底每时隙一次 + SNR 去重后多线程并行）。详见 `docs/04` §4.8、`docs/02` §7.5。
+- ✅ P2.3 公共精细对齐（`ft8_align`）已抽取并**逐位验证**（dump 字节相同）；选择性 LLR 重解
+  （`enable_llr_refine`，**默认关**）实测为**负结果**（召回不变、耗时 ×2.5），仅保留实验开关 `--llr-refine`。详见 `docs/04` §3.5、`docs/02` §7.6。
 - ⏳ P1 剩余：AP 解码、分级候选。
-- ⏳ P2 剩余：公共精细对齐/选择性 LLR 重解、NEON 优化、线程池、完整比赛/遥测消息集。
+- ⏳ P2 剩余：NEON 优化、常驻线程池、完整比赛/遥测消息集。
