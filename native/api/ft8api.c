@@ -292,32 +292,103 @@ typedef struct
     int count;
 } decode_worker_arg_t;
 
-/** 由候选与瀑布参数还原音调 0 频率 (Hz) 与消息起点偏移 (s)。 */
-static void cand_freq_time(const monitor_t* mon, const ftx_candidate_t* cand,
-                           float* freq0, float* dt)
+/* 判断消息是否已在 seen 中出现（按哈希 + 载荷去重）。 */
+static bool hit_seen_before(const ftx_message_t* m, const ftx_message_t* seen, int n);
+
+/* 对单条保留命中计算时域逐符号 SNR；失败时退回瀑布域 snr_order。 */
+static void snr_batch_one(pass_hit_t* h, const float* samples, int num_samples, int sample_rate)
 {
-    const ftx_waterfall_t* wf = &mon->wf;
-    *freq0 = (mon->min_bin + cand->freq_offset +
-              (float)cand->freq_sub / wf->freq_osr) / mon->symbol_period;
-    *dt = (cand->time_offset + (float)cand->time_sub / wf->time_osr) * mon->symbol_period;
+    uint8_t tones[FT8_NN];
+    ft8_encode(h->message.payload, tones);
+    float s = ft8_spectrum_snr(samples, num_samples, sample_rate, tones, h->freq, h->time);
+    h->snr_raw = (s != 0.0f) ? s : h->snr_order;
 }
 
-/** 估计原始 SNR (dB)：优先逐符号时域频谱（P2.2），无样本时退回瀑布域。 */
-static float compute_snr_raw(const monitor_t* mon, const ftx_candidate_t* cand,
-                             const uint8_t* payload,
-                             const float* samples, int num_samples, int sample_rate)
+typedef struct
 {
-    if (samples && num_samples > 0 && sample_rate > 0)
+    pass_hit_t* hits;
+    const int* idx; /**< 待计算命中在 hits 中的下标 */
+    int n;          /**< 待计算条数 */
+    const float* samples;
+    int num_samples;
+    int sample_rate;
+    int next; /**< 共享任务游标，受 lock 保护 */
+    ft8_mutex_t* lock;
+} snr_batch_ctx_t;
+
+static void snr_batch_worker(void* arg)
+{
+    snr_batch_ctx_t* c = (snr_batch_ctx_t*)arg;
+    for (;;)
     {
-        uint8_t tones[FT8_NN];
-        ft8_encode(payload, tones);
-        float freq0, dt;
-        cand_freq_time(mon, cand, &freq0, &dt);
-        float snr = ft8_spectrum_snr(samples, num_samples, sample_rate, tones, freq0, dt);
-        if (snr != 0.0f)
-            return snr;
+        ft8_mutex_lock(c->lock);
+        const int k = c->next++;
+        ft8_mutex_unlock(c->lock);
+        if (k >= c->n)
+            break;
+        snr_batch_one(&c->hits[c->idx[k]], c->samples, c->num_samples, c->sample_rate);
     }
-    return ftx_compute_snr(&mon->wf, cand, payload);
+}
+
+/* 并行计算去重后命中的时域 SNR：每条约数十毫秒，串行会超预算，故按多线程拆分。 */
+static void compute_snr_batch(pass_hit_t* hits, const int* idx, int n,
+                              const float* samples, int num_samples, int sample_rate,
+                              int num_threads)
+{
+    if (n <= 0 || !samples || num_samples <= 0 || sample_rate <= 0)
+        return;
+    if (num_threads < 1)
+        num_threads = 1;
+    if (num_threads > n)
+        num_threads = n;
+
+    snr_batch_ctx_t ctx;
+    ctx.hits = hits;
+    ctx.idx = idx;
+    ctx.n = n;
+    ctx.samples = samples;
+    ctx.num_samples = num_samples;
+    ctx.sample_rate = sample_rate;
+    ctx.next = 0;
+    ctx.lock = ft8_mutex_create();
+    if (!ctx.lock)
+    {
+        for (int k = 0; k < n; ++k)
+            snr_batch_one(&hits[idx[k]], samples, num_samples, sample_rate);
+        return;
+    }
+
+    if (num_threads == 1)
+    {
+        snr_batch_worker(&ctx);
+    }
+    else
+    {
+        ft8_thread_t** threads = (ft8_thread_t**)calloc((size_t)num_threads, sizeof(ft8_thread_t*));
+        if (!threads)
+        {
+            snr_batch_worker(&ctx);
+        }
+        else
+        {
+            for (int t = 0; t < num_threads; ++t)
+            {
+                threads[t] = ft8_thread_create(snr_batch_worker, &ctx);
+                if (!threads[t])
+                    snr_batch_worker(&ctx); /* 创建失败则当前线程补跑 */
+            }
+            for (int t = 0; t < num_threads; ++t)
+            {
+                if (threads[t])
+                {
+                    ft8_thread_join(threads[t]);
+                    ft8_thread_free(threads[t]);
+                }
+            }
+            free(threads);
+        }
+    }
+    ft8_mutex_free(ctx.lock);
 }
 
 static void decode_worker(void* arg)
@@ -339,9 +410,10 @@ static void decode_worker(void* arg)
         r->message = message;
         r->status = status;
         r->score = cand->score;
-        r->snr_raw = compute_snr_raw(w->mon, cand, message.payload,
-                                     w->samples, w->num_samples, w->sample_rate);
         r->snr_order = ftx_compute_snr(w->wf, cand, message.payload);
+        /* 时域逐符号 SNR 成本较高：统一在 decode_pass 合并去重后并行计算，
+         * 只对最终保留的命中算一次（见 compute_snr_batch）。 */
+        r->snr_raw = 0.0f;
     }
 }
 
@@ -356,6 +428,7 @@ static int raw_compare(const void* a, const void* b)
  * （不做去重，由调用方处理）。返回命中条数，负数见 ft8_error_t。 */
 static int decode_pass(const monitor_t* mon, const float* samples, int num_samples, int sample_rate,
                        const ft8_decode_config_t* cfg,
+                       const ftx_message_t* seen, int num_seen,
                        pass_hit_t* out, int max_out)
 {
     const ftx_waterfall_t* wf = &mon->wf;
@@ -466,6 +539,13 @@ static int decode_pass(const monitor_t* mon, const float* samples, int num_sampl
             }
             qsort(merged, (size_t)total_raw, sizeof(raw_decode_t), raw_compare);
 
+            /* uniq 记录「首次出现」的保留命中下标；pass_seen 用于本遍内去重。
+             * 这些命中才需要昂贵的时域 SNR；重复项由调用方丢弃，无需计算。 */
+            int* uniq = (int*)malloc((size_t)total_raw * sizeof(int));
+            ftx_message_t* pass_seen = (ftx_message_t*)malloc((size_t)total_raw * sizeof(ftx_message_t));
+            int nuniq = 0;
+            int npass = 0;
+
             for (int i = 0; i < total_raw; ++i)
             {
                 raw_decode_t* r = &merged[i];
@@ -484,6 +564,9 @@ static int decode_pass(const monitor_t* mon, const float* samples, int num_sampl
                         continue;
                 }
 
+                const bool dup = (seen && hit_seen_before(&r->message, seen, num_seen)) ||
+                                 (pass_seen && hit_seen_before(&r->message, pass_seen, npass));
+
                 if (num_hits < max_out)
                 {
                     const ftx_candidate_t* cand = &cands[r->cand_index];
@@ -491,15 +574,29 @@ static int decode_pass(const monitor_t* mon, const float* samples, int num_sampl
                     h->message = r->message;
                     h->status = r->status;
                     h->score = r->score;
-                    h->snr_raw = r->snr_raw;
+                    h->snr_raw = 0.0f; /* 稍后对保留命中并行计算 */
                     h->snr_order = r->snr_order;
                     h->freq = (mon->min_bin + cand->freq_offset +
                                (float)cand->freq_sub / wf->freq_osr) / mon->symbol_period;
                     h->time = (cand->time_offset +
                                (float)cand->time_sub / wf->time_osr) * mon->symbol_period;
+                    if (!dup && pass_seen && uniq)
+                    {
+                        pass_seen[npass++] = r->message;
+                        uniq[nuniq++] = num_hits;
+                    }
                 }
                 num_hits++;
             }
+
+            if (pass_seen && uniq)
+                compute_snr_batch(out, uniq, nuniq, samples, num_samples, sample_rate, num_threads);
+            else
+                for (int k = 0; k < num_hits; ++k) /* 内存不足：退化为串行且不去重 */
+                    snr_batch_one(&out[k], samples, num_samples, sample_rate);
+
+            free(uniq);
+            free(pass_seen);
             free(merged);
         }
     }
@@ -568,7 +665,7 @@ static int decode_from_monitor(monitor_t* mon, const float* samples, int num_sam
         return FT8_ERR_NOMEM;
     }
 
-    int total = decode_pass(mon, samples, num_samples, sample_rate, cfg, hits, cap);
+    int total = decode_pass(mon, samples, num_samples, sample_rate, cfg, NULL, 0, hits, cap);
     if (total < 0)
     {
         free(hits);
@@ -663,7 +760,7 @@ static int decode_slot_multipass(monitor_t* mon, const float* samples, int num_s
     {
         monitor_feed_slot(mon, resid, num_samples);
 
-        int total = decode_pass(mon, resid, num_samples, sample_rate, cfg, hits, cap);
+        int total = decode_pass(mon, resid, num_samples, sample_rate, cfg, seen, num_seen, hits, cap);
         if (total < 0)
         {
             rc = total;
