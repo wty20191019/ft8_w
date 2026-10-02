@@ -1,0 +1,90 @@
+﻿ft8core 0.1.0
+./191111_110115.wav                        0/1    missed  1  extra  0    29.6 ms
+./191111_110130.wav                        4/5    missed  1  extra  0    65.7 ms
+./191111_110145.wav                        2/2    missed  0  extra  0    49.1 ms
+./191111_110200.wav                        4/5    missed  1  extra  0    64.9 ms
+./191111_110215.wav                        3/4    missed  1  extra  0    60.2 ms
+./191111_110615.wav                       20/22   missed  2  extra  0   210.2 ms
+./191111_110630.wav                       13/15   missed  2  extra  1   176.2 ms
+./191111_110645.wav                       18/20   missed  2  extra  0   206.7 ms
+./191111_110700.wav                       14/16   missed  2  extra  0   162.2 ms
+./test_01.wav                             17/24   missed  7  extra  3   234.7 ms
+./test_02.wav                             20/24   missed  4  extra  0   233.2 ms
+./test_03.wav                             15/19   missed  4  extra  2   211.7 ms
+./test_04.wav                             17/20   missed  3  extra  4   221.0 ms
+./test_05.wav                             22/32   missed 10  extra  0   252.5 ms
+./test_06.wav                             21/27   missed  6  extra  1   247.6 ms
+./test_07.wav                             24/31   missed  7  extra  0   267.9 ms
+./test_08.wav                             17/19   missed  2  extra  3   222.3 ms
+./test_09.wav                             21/27   missed  6  extra  0   245.5 ms
+./test_10.wav                             17/20   missed  3  extra  2   210.9 ms
+./test_11.wav                             21/31   missed 10  extra  0   247.3 ms
+./test_12.wav                             16/18   missed  2  extra  3   209.8 ms
+./test_13.wav                             23/26   missed  3  extra  1   268.9 ms
+./test_14.wav                             16/17   missed  1  extra  1   191.7 ms
+./test_15.wav                             26/28   missed  2  extra  0   282.6 ms
+./test_16.wav                             16/16   missed  0  extra  1   189.1 ms
+./test_17.wav                             23/26   missed  3  extra  0   255.0 ms
+./test_18.wav                             17/20   missed  3  extra  1   214.7 ms
+./test_19.wav                             25/30   missed  5  extra  0   266.0 ms
+./test_20.wav                             17/20   missed  3  extra  2   226.8 ms
+./test_21.wav                             23/34   missed 11  extra  0   259.3 ms
+./test_22.wav                             21/23   missed  2  extra  0   242.7 ms
+./test_23.wav                             22/26   missed  4  extra  1   244.1 ms
+./test_24.wav                             19/22   missed  3  extra  1   224.2 ms
+./test_25.wav                             23/28   missed  5  extra  0   269.2 ms
+./test_26.wav                             19/23   missed  4  extra  1   222.5 ms
+./test_27.wav                             24/29   missed  5  extra  0   280.4 ms
+./test_28.wav                             19/25   missed  6  extra  0   224.9 ms
+./test_29.wav                             18/23   missed  5  extra  1   229.9 ms
+./test_30.wav                             20/27   missed  7  extra  0   239.7 ms
+./test_31.wav                             21/24   missed  3  extra  3   269.1 ms
+./test_32.wav                             23/25   missed  2  extra  3   289.4 ms
+./test_33.wav                             24/28   missed  4  extra  0   255.9 ms
+./test_34.wav                             20/25   missed  5  extra  0   238.8 ms
+./test_35.wav                             23/32   missed  9  extra  0   256.7 ms
+./test_36.wav                             17/24   missed  7  extra  1   212.0 ms
+./test_37.wav                             22/24   missed  2  extra  0   244.7 ms
+./test_38.wav                             14/19   missed  5  extra  0   165.4 ms
+./websdr_test1.wav                        14/18   missed  4  extra  0   175.0 ms
+./websdr_test10.wav                       12/15   missed  3  extra  0   139.1 ms
+./websdr_test11.wav                       16/23   missed  7  extra  0   158.8 ms
+./websdr_test12.wav                        8/14   missed  6  extra  1   128.9 ms
+./websdr_test13.wav                       12/13   missed  1  extra  2   172.0 ms
+[skip] ./websdr_test14.wav (鏃犲鐓?txt)
+[skip] ./websdr_test14_12k.wav (鏃犲鐓?txt)
+[skip] ./websdr_test15.wav (鏃犲鐓?txt)
+[skip] ./websdr_test15_12k.wav (鏃犲鐓?txt)
+[skip] ./websdr_test16.wav (鏃犲鐓?txt)
+[skip] ./websdr_test17.wav (鏃犲鐓?txt)
+[skip] ./websdr_test18.wav (鏃犲鐓?txt)
+[skip] ./websdr_test19.wav (鏃犲鐓?txt)
+./websdr_test2.wav                        21/21   missed  0  extra  0   238.9 ms
+[skip] ./websdr_test20.wav (鏃犲鐓?txt)
+./websdr_test3.wav                        10/11   missed  1  extra  1   148.5 ms
+./websdr_test4.wav                        22/23   missed  1  extra  1   249.0 ms
+./websdr_test5.wav                        22/27   missed  5  extra  0   240.0 ms
+./websdr_test6.wav                        25/30   missed  5  extra  0   265.1 ms
+./websdr_test7.wav                        21/27   missed  6  extra  2   251.7 ms
+./websdr_test8.wav                        21/26   missed  5  extra  0   245.0 ms
+./websdr_test9.wav                        18/24   missed  6  extra  0   194.0 ms
+[skip] ./syn_a.wav (鏃犲鐓?txt)
+[skip] ./mix_s.wav (鏃犲鐓?txt)
+[skip] ./mix_w.wav (鏃犲鐓?txt)
+[skip] ./mix_sw.wav (鏃犲鐓?txt)
+[skip] ./m2_s.wav (鏃犲鐓?txt)
+[skip] ./m2_w.wav (鏃犲鐓?txt)
+[skip] ./m2_sw.wav (鏃犲鐓?txt)
+[skip] ./c_s.wav (鏃犲鐓?txt)
+[skip] ./c_w.wav (鏃犲鐓?txt)
+[skip] ./c_sw.wav (鏃犲鐓?txt)
+
+===== 姹囨€?=====
+鏂囦欢鏁?       : 79
+鏈熸湜娑堟伅鏁?   : 1298
+鍛戒腑          : 1063
+婕忚В (missed) : 235 (18.1%)
+澶氫綑 (extra)  : 43 (3.3%)
+鍙洖鐜?Recall : 81.9%
+瑙ｇ爜鑰楁椂      : avg 211.6 ms, P50 229.9 ms, P95 280.4 ms, max 289.4 ms
+SNR 鏍囧畾      : snr_ref = 0.995*raw + 0.24, R2=0.315 (n=1063)

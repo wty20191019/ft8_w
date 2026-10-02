@@ -14,6 +14,7 @@
 #include "ft8_hash.h"
 #include "ft8_gfsk.h"
 #include "ft8_subtract.h"
+#include "ft8_spectrum.h"
 
 #include <ft8/constants.h>
 #include <ft8/crc.h>
@@ -40,8 +41,8 @@
  *     snr_ref = 1.195 * raw - 26.86   (R^2 = 0.338)
  * 局限性见 docs/02-测试报告.md §7.1：本管线用 2 符号 Hann 窗瀑布，
  * 动态范围被压缩、离散偏大，精确对齐 JTDX 需逐符号频谱（P2）。 */
-#define FT8_SNR_CALIB_SLOPE       1.195f
-#define FT8_SNR_CALIB_INTERCEPT   (-26.86f)
+#define FT8_SNR_CALIB_SLOPE       1.0f
+#define FT8_SNR_CALIB_INTERCEPT   (0.0f)
 
 /* 最近一次错误信息（简单全局，解码通常单调用者） */
 static char s_last_error[256];
@@ -275,8 +276,12 @@ typedef struct
 
 typedef struct
 {
+    const monitor_t* mon;
     const ftx_waterfall_t* wf;
     const ftx_candidate_t* cands;
+    const float* samples; /**< 本遍时域样本（用于逐符号频谱 SNR），可为 NULL */
+    int num_samples;
+    int sample_rate;
     int start;
     int end;
     int ldpc_iterations;
@@ -284,6 +289,34 @@ typedef struct
     raw_decode_t* out;
     int count;
 } decode_worker_arg_t;
+
+/** 由候选与瀑布参数还原音调 0 频率 (Hz) 与消息起点偏移 (s)。 */
+static void cand_freq_time(const monitor_t* mon, const ftx_candidate_t* cand,
+                           float* freq0, float* dt)
+{
+    const ftx_waterfall_t* wf = &mon->wf;
+    *freq0 = (mon->min_bin + cand->freq_offset +
+              (float)cand->freq_sub / wf->freq_osr) / mon->symbol_period;
+    *dt = (cand->time_offset + (float)cand->time_sub / wf->time_osr) * mon->symbol_period;
+}
+
+/** 估计原始 SNR (dB)：优先逐符号时域频谱（P2.2），无样本时退回瀑布域。 */
+static float compute_snr_raw(const monitor_t* mon, const ftx_candidate_t* cand,
+                             const uint8_t* payload,
+                             const float* samples, int num_samples, int sample_rate)
+{
+    if (samples && num_samples > 0 && sample_rate > 0)
+    {
+        uint8_t tones[FT8_NN];
+        ft8_encode(payload, tones);
+        float freq0, dt;
+        cand_freq_time(mon, cand, &freq0, &dt);
+        float snr = ft8_spectrum_snr(samples, num_samples, sample_rate, tones, freq0, dt);
+        if (snr != 0.0f)
+            return snr;
+    }
+    return ftx_compute_snr(&mon->wf, cand, payload);
+}
 
 static void decode_worker(void* arg)
 {
@@ -304,7 +337,8 @@ static void decode_worker(void* arg)
         r->message = message;
         r->status = status;
         r->score = cand->score;
-        r->snr_raw = ftx_compute_snr(w->wf, cand, message.payload);
+        r->snr_raw = compute_snr_raw(w->mon, cand, message.payload,
+                                     w->samples, w->num_samples, w->sample_rate);
     }
 }
 
@@ -317,7 +351,8 @@ static int raw_compare(const void* a, const void* b)
 
 /* 单遍解码：在瀑布上搜索候选 + 多线程解码，返回按候选顺序排列的命中
  * （不做去重，由调用方处理）。返回命中条数，负数见 ft8_error_t。 */
-static int decode_pass(const monitor_t* mon, const ft8_decode_config_t* cfg,
+static int decode_pass(const monitor_t* mon, const float* samples, int num_samples, int sample_rate,
+                       const ft8_decode_config_t* cfg,
                        pass_hit_t* out, int max_out)
 {
     const ftx_waterfall_t* wf = &mon->wf;
@@ -369,8 +404,12 @@ static int decode_pass(const monitor_t* mon, const ft8_decode_config_t* cfg,
 
     for (int t = 0; t < num_threads; ++t)
     {
+        args[t].mon = mon;
         args[t].wf = wf;
         args[t].cands = cands;
+        args[t].samples = samples;
+        args[t].num_samples = num_samples;
+        args[t].sample_rate = sample_rate;
         args[t].start = (num_cand * t) / num_threads;
         args[t].end = (num_cand * (t + 1)) / num_threads;
         args[t].ldpc_iterations = iters;
@@ -508,7 +547,8 @@ static void emit_hit(const pass_hit_t* h, int pass, ft8_message_result_t* res)
 }
 
 /// 在瀑布数据上执行候选搜索 + 并行解码 + 去重解包（单遍路径）。
-static int decode_from_monitor(monitor_t* mon, const ft8_decode_config_t* cfg,
+static int decode_from_monitor(monitor_t* mon, const float* samples, int num_samples, int sample_rate,
+                               const ft8_decode_config_t* cfg,
                                ft8_message_result_t* out, int max_out)
 {
     int cap = cfg->max_candidates;
@@ -524,7 +564,7 @@ static int decode_from_monitor(monitor_t* mon, const ft8_decode_config_t* cfg,
         return FT8_ERR_NOMEM;
     }
 
-    int total = decode_pass(mon, cfg, hits, cap);
+    int total = decode_pass(mon, samples, num_samples, sample_rate, cfg, hits, cap);
     if (total < 0)
     {
         free(hits);
@@ -585,12 +625,13 @@ static int decode_slot_multipass(monitor_t* mon, const float* samples, int num_s
     if (cap > 2048)
         cap = 2048;
 
-    ft8_subtract_t* sub = ft8_subtract_create(
-        (cfg->sample_rate > 0) ? cfg->sample_rate : 12000, num_samples);
+    const int sample_rate = (cfg->sample_rate > 0) ? cfg->sample_rate : 12000;
+
+    ft8_subtract_t* sub = ft8_subtract_create(sample_rate, num_samples);
     if (!sub)
     {
         /* 消除器创建失败：退化为单遍，保证可用性 */
-        return decode_from_monitor(mon, cfg, out, max_out);
+        return decode_from_monitor(mon, samples, num_samples, sample_rate, cfg, out, max_out);
     }
 
     float* resid = (float*)malloc((size_t)num_samples * sizeof(float));
@@ -618,7 +659,7 @@ static int decode_slot_multipass(monitor_t* mon, const float* samples, int num_s
     {
         monitor_feed_slot(mon, resid, num_samples);
 
-        int total = decode_pass(mon, cfg, hits, cap);
+        int total = decode_pass(mon, resid, num_samples, sample_rate, cfg, hits, cap);
         if (total < 0)
         {
             rc = total;
@@ -716,7 +757,7 @@ int ft8_decode_slot(const float* samples, int num_samples,
         {
             monitor_process(&mon, samples + pos);
         }
-        result = decode_from_monitor(&mon, cfg, out, max_out);
+        result = decode_from_monitor(&mon, samples, num_samples, mc.sample_rate, cfg, out, max_out);
     }
 
     monitor_free(&mon);
@@ -889,7 +930,12 @@ int ft8_decode_session_finalize(ft8_decode_session_t* session,
         result = decode_slot_multipass(&session->mon, session->slot, session->slot_len,
                                        &session->cfg, out, max_out);
     else
-        result = decode_from_monitor(&session->mon, &session->cfg, out, max_out);
+    {
+        const int srate = (session->cfg.sample_rate > 0) ? session->cfg.sample_rate : 12000;
+        const float* slot = (session->slot_len > 0) ? session->slot : NULL;
+        result = decode_from_monitor(&session->mon, slot, session->slot_len, srate,
+                                     &session->cfg, out, max_out);
+    }
     ft8_hash_cleanup(10);
     return result;
 }

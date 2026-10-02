@@ -1,0 +1,4 @@
+D:/Desktop/ft8_w/native/build-android/CMakeFiles/ft8core.dir
+D:/Desktop/ft8_w/native/build-android/CMakeFiles/ft8.dir
+D:/Desktop/ft8_w/native/build-android/CMakeFiles/edit_cache.dir
+D:/Desktop/ft8_w/native/build-android/CMakeFiles/rebuild_cache.dir

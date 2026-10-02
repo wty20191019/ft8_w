@@ -429,6 +429,10 @@ static int cmd_bench(int argc, char** argv)
     double* times = (double*)malloc((size_t)nfiles * sizeof(double));
     int ntimed = 0;
 
+    /* 诊断：FT8_SNR_DUMP 指向的文件写入匹配对的 (解码SNR, 参考SNR) */
+    const char* dump_path = getenv("FT8_SNR_DUMP");
+    FILE* fdump = dump_path ? fopen(dump_path, "w") : NULL;
+
     /* SNR 标定统计：对 (解码 SNR, 参考 SNR) 做线性回归 */
     double snr_sum_x = 0.0, snr_sum_y = 0.0;
     double snr_sum_xx = 0.0, snr_sum_xy = 0.0, snr_sum_yy = 0.0;
@@ -531,6 +535,8 @@ static int cmd_bench(int argc, char** argv)
                 matched++;
                 double x = (double)got_snr[match_j];   /* 解码 SNR（当前标定） */
                 double y = (double)expected_snr[i];     /* 参考 SNR */
+                if (fdump)
+                    fprintf(fdump, "%.4f %d\n", x, expected_snr[i]);
                 snr_sum_x += x;
                 snr_sum_y += y;
                 snr_sum_xx += x * x;
@@ -609,6 +615,9 @@ static int cmd_bench(int argc, char** argv)
         printf("SNR 标定      : snr_ref = %.3f*raw + %.2f, R2=%.3f (n=%ld)\n",
                a, b, r2, snr_calib_n);
     }
+
+    if (fdump)
+        fclose(fdump);
 
     for (int i = 0; i < nfiles; ++i)
         free(files[i]);
