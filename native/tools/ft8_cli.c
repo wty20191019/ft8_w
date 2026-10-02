@@ -536,7 +536,7 @@ static int cmd_bench(int argc, char** argv)
                 double x = (double)got_snr[match_j];   /* 解码 SNR（当前标定） */
                 double y = (double)expected_snr[i];     /* 参考 SNR */
                 if (fdump)
-                    fprintf(fdump, "%.4f %d\n", x, expected_snr[i]);
+                    fprintf(fdump, "%.4f %d %s\n", x, expected_snr[i], expected[i]);
                 snr_sum_x += x;
                 snr_sum_y += y;
                 snr_sum_xx += x * x;

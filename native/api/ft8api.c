@@ -260,7 +260,8 @@ typedef struct
     ftx_message_t message;          /**< 解出的消息 */
     ftx_decode_status_t status;     /**< 解码状态（CRC 等） */
     int score;                      /**< Costas 同步分 */
-    float snr_raw;                  /**< 原始 SNR 指标 (dB)，未标定 */
+    float snr_raw;                  /**< 原始 SNR 指标 (dB)，未标定（P2.2 逐符号频谱） */
+    float snr_order;                /**< 用于信号消除排序的 SNR（旧瀑布域口径，保持解码行为稳定） */
 } raw_decode_t;
 
 /** 单遍解码命中（含频率/时间，供多遍信号消除使用）。 */
@@ -270,6 +271,7 @@ typedef struct
     ftx_decode_status_t status;
     int score;
     float snr_raw;
+    float snr_order;
     float freq; /**< 音调 0 频率 (Hz) */
     float time; /**< 消息起点偏移 (s) */
 } pass_hit_t;
@@ -339,6 +341,7 @@ static void decode_worker(void* arg)
         r->score = cand->score;
         r->snr_raw = compute_snr_raw(w->mon, cand, message.payload,
                                      w->samples, w->num_samples, w->sample_rate);
+        r->snr_order = ftx_compute_snr(w->wf, cand, message.payload);
     }
 }
 
@@ -489,6 +492,7 @@ static int decode_pass(const monitor_t* mon, const float* samples, int num_sampl
                     h->status = r->status;
                     h->score = r->score;
                     h->snr_raw = r->snr_raw;
+                    h->snr_order = r->snr_order;
                     h->freq = (mon->min_bin + cand->freq_offset +
                                (float)cand->freq_sub / wf->freq_osr) / mon->symbol_period;
                     h->time = (cand->time_offset +
@@ -695,7 +699,7 @@ static int decode_slot_multipass(monitor_t* mon, const float* samples, int num_s
         {
             for (int b = a + 1; b < nnew; ++b)
             {
-                if (hits[new_idx[b]].snr_raw > hits[new_idx[a]].snr_raw)
+                if (hits[new_idx[b]].snr_order > hits[new_idx[a]].snr_order)
                 {
                     int tmp = new_idx[a];
                     new_idx[a] = new_idx[b];

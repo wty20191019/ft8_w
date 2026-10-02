@@ -38,6 +38,13 @@
 #define FT8_SP_FINE_SYMS 16      /* 细搜相关符号数 */
 #define FT8_SP_FINE_RANGE 24     /* 细搜范围 ±，样本 */
 
+/* 频率消歧：候选频率可能整体偏整数个音调，扫描 ±此值的音调数。 */
+#define FT8_SP_FREQ_TONES 2
+#define FT8_SP_FREQ_STEP 192 /* 频率消歧阶段的粗时间步长，样本 */
+
+/* 相位斜率残余频偏的可用范围：超过半音调间隔会混叠，故钳制在此。 */
+#define FT8_SP_DF_CLAMP 3.0f
+
 typedef struct
 {
     float freq; /* 音调 0 精化频率 (Hz) */
@@ -194,13 +201,61 @@ static int sp_align_refine(const float* x, int num_samples, int fs, int nsps,
 
     int n0 = (int)lroundf(dt0 * (float)fs);
 
-    /* 1. 非相干粗对齐：累加 12 个符号的相关幅值，找符号边界。
-     *    相干匹配滤波在频率失配时存在延迟-多普勒耦合，会把峰值拉偏
-     *    并污染后续相位斜率回归；非相干幅值对此免疫。 */
+    /* 1. 频率消歧 + 非相干粗对齐。
+     *    候选频率可能整体偏整数个音调（例如 SP4TXI 类信号），若直接用
+     *    候选频率做相位斜率回归会得到无意义结果。故先在 freq0 + k*6.25
+     *    （k=-2..2）上各做一次粗时间搜索，取非相干幅值最强者。
+     *    非相干幅值对残余频偏不敏感，可避免相干匹配滤波在频率失配 +
+     *    时延下的延迟-多普勒耦合。 */
+    int best_k = 0;
     {
-        int best = 0;
+        float* work_re = (float*)malloc((size_t)L * sizeof(float));
+        float* work_im = (float*)malloc((size_t)L * sizeof(float));
+        if (!work_re || !work_im)
+        {
+            free(work_re);
+            free(work_im);
+            free(ref_re);
+            free(ref_im);
+            return -1;
+        }
+
+        /* 1a. 以较大步长在 ±2 音调上粗搜，确定音调整数偏移与大致时延 */
+        int coarse_best = 0;
+        float coarse_mag = -1.0f;
+        for (int k = -FT8_SP_FREQ_TONES; k <= FT8_SP_FREQ_TONES; ++k)
+        {
+            const float* wr = ref_re;
+            const float* wi = ref_im;
+            if (k != 0)
+            {
+                memcpy(work_re, ref_re, (size_t)L * sizeof(float));
+                memcpy(work_im, ref_im, (size_t)L * sizeof(float));
+                sp_modulate_ref(work_re, work_im, L, fs, (float)k * FT8_SP_TONE_SPACING);
+                wr = work_re;
+                wi = work_im;
+            }
+            for (int sh = -FT8_SP_COARSE_RANGE; sh <= FT8_SP_COARSE_RANGE; sh += FT8_SP_FREQ_STEP)
+            {
+                float mag = sp_correlate_nc(x, num_samples, n0 + sh, wr, wi, nsps,
+                                            FT8_SP_COARSE_SYMS);
+                if (mag > coarse_mag)
+                {
+                    coarse_mag = mag;
+                    coarse_best = sh;
+                    best_k = k;
+                }
+            }
+        }
+
+        /* 1b. 在最优音调上以精细步长收敛时延 */
+        if (best_k != 0)
+            sp_modulate_ref(ref_re, ref_im, L, fs, (float)best_k * FT8_SP_TONE_SPACING);
+
+        int best = coarse_best;
         float best_mag = -1.0f;
-        for (int sh = -FT8_SP_COARSE_RANGE; sh <= FT8_SP_COARSE_RANGE; sh += FT8_SP_COARSE_STEP)
+        for (int sh = coarse_best - FT8_SP_FREQ_STEP; sh <= coarse_best + FT8_SP_FREQ_STEP;
+             sh += FT8_SP_COARSE_STEP)
         {
             float mag = sp_correlate_nc(x, num_samples, n0 + sh, ref_re, ref_im, nsps,
                                         FT8_SP_COARSE_SYMS);
@@ -211,14 +266,17 @@ static int sp_align_refine(const float* x, int num_samples, int fs, int nsps,
             }
         }
         n0 += best;
+
+        free(work_re);
+        free(work_im);
     }
 
     /* 2. 频偏估计并调制参考；此时窗口已接近真实符号边界，相位斜率回归可靠 */
     float df = sp_estimate_df(x, num_samples, fs, nsps, ref_re, ref_im, n0);
 #if defined(FT8_SP_DEBUG)
-    fprintf(stderr, "[sp] n0=%d df_est=%.3f (freq0=%.2f dt0=%.3f)\n", n0, df, freq0, dt0);
+    fprintf(stderr, "[sp] n0=%d df_est=%.3f k=%d (freq0=%.2f dt0=%.3f)\n", n0, df, best_k, freq0, dt0);
 #endif
-    if (fabsf(df) > 5.0f)
+    if (fabsf(df) > FT8_SP_DF_CLAMP)
         df = 0.0f;
     sp_modulate_ref(ref_re, ref_im, L, fs, df);
 
@@ -246,7 +304,7 @@ static int sp_align_refine(const float* x, int num_samples, int fs, int nsps,
     free(ref_re);
     free(ref_im);
 
-    out->freq = freq0 + df;
+    out->freq = freq0 + (float)best_k * FT8_SP_TONE_SPACING + df;
     out->dt = (float)n0 / (float)fs;
     return 0;
 }
@@ -366,6 +424,10 @@ float ft8_spectrum_snr(const float* samples, int num_samples, int sample_rate,
     double x = sum_ratio / (double)used - 1.0;
     if (x < 0.001)
         x = 0.001;
+
+#if defined(FT8_SP_DEBUG)
+    fprintf(stderr, "[sp]   final freq=%.3f dt=%.4f x=%.3f used=%d\n", al.freq, al.dt, x, used);
+#endif
 
 #if defined(FT8_SP_RAW_ONLY)
     return (float)(10.0 * log10(x));
