@@ -18,6 +18,7 @@
  * 端点增益校正（补偿滤波器在边界处只覆盖部分抽头造成的衰减）。
  */
 #include "ft8_subtract.h"
+#include "ft8_align.h"
 #include "ft8_gfsk.h"
 
 #include <ft8/constants.h>
@@ -165,112 +166,6 @@ void ft8_subtract_free(ft8_subtract_t* s)
     free(s);
 }
 
-/* 相关：Σ x[base+k]·conj(ref[k])，越界样本按 0 处理 */
-static void sub_correlate(const float* x, int num_samples, int base,
-                          const float* ref_re, const float* ref_im, int m,
-                          float* out_re, float* out_im)
-{
-    float cr = 0.0f, ci = 0.0f;
-    for (int k = 0; k < m; ++k)
-    {
-        int idx = base + k;
-        if (idx < 0 || idx >= num_samples)
-            continue;
-        float xv = x[idx];
-        cr += xv * ref_re[k];
-        ci -= xv * ref_im[k];
-    }
-    *out_re = cr;
-    *out_im = ci;
-}
-
-/* 频偏估计：逐符号相关相位斜率的加权线性回归，返回 Δf (Hz) */
-static float sub_estimate_df(const ft8_subtract_t* s, const float* x, int num_samples, int n0)
-{
-    int Ns = s->n_spsym;
-    int rate = s->sample_rate;
-
-    double sw = 0.0, sx = 0.0, sy = 0.0, sxx = 0.0, sxy = 0.0;
-    double unwrapped = 0.0;
-    float prev_ph = 0.0f;
-    int have_prev = 0;
-
-    for (int i = 0; i < FT8_NN; ++i)
-    {
-        int base = n0 + i * Ns;
-        if (base < 0 || base + Ns > num_samples)
-            continue; /* 只使用完整落在区间内的符号，避免相位解缠跳变 */
-
-        float cr, ci;
-        sub_correlate(x, num_samples, base, s->ref_re + i * Ns, s->ref_im + i * Ns, Ns, &cr, &ci);
-        float mag = sqrtf(cr * cr + ci * ci);
-        if (mag < 1e-9f)
-            continue;
-        float ph = atan2f(ci, cr);
-        if (!have_prev)
-        {
-            unwrapped = ph;
-            have_prev = 1;
-        }
-        else
-        {
-            float d = ph - prev_ph;
-            while (d > (float)M_PI)
-                d -= 2.0f * (float)M_PI;
-            while (d < -(float)M_PI)
-                d += 2.0f * (float)M_PI;
-            unwrapped += d;
-        }
-        prev_ph = ph;
-
-        double t = (double)(i * Ns + Ns / 2) / (double)rate;
-        double w = (double)mag;
-        sw += w;
-        sx += w * t;
-        sy += w * unwrapped;
-        sxx += w * t * t;
-        sxy += w * t * unwrapped;
-    }
-
-    if (sw < 1e-9)
-        return 0.0f;
-    double denom = sw * sxx - sx * sx;
-    if (fabs(denom) < 1e-12)
-        return 0.0f;
-    double slope = (sw * sxy - sx * sy) / denom; /* rad/s */
-    return (float)(slope / (2.0 * M_PI));
-}
-
-/* 以 exp(j·2πΔf·k/rate) 调制参考（原地） */
-static void sub_modulate_ref(ft8_subtract_t* s, float df)
-{
-    if (fabsf(df) < 1e-6f)
-        return;
-    int L = s->L;
-    double dphi = 2.0 * M_PI * (double)df / (double)s->sample_rate;
-    double cw = cos(dphi), sw = sin(dphi);
-    double r = 1.0, im = 0.0;
-    for (int k = 0; k < L; ++k)
-    {
-        float cc = (float)r, ss = (float)im;
-        float re = s->ref_re[k], ie = s->ref_im[k];
-        s->ref_re[k] = re * cc - ie * ss;
-        s->ref_im[k] = re * ss + ie * cc;
-        double nr = r * cw - im * sw;
-        im = r * sw + im * cw;
-        r = nr;
-        if ((k & 1023) == 1023)
-        {
-            double m = sqrt(r * r + im * im);
-            if (m > 0)
-            {
-                r /= m;
-                im /= m;
-            }
-        }
-    }
-}
-
 /* 计算复包络 env = LPF[x·conj(ref)]，结果存于 ebuf[0..L-1] */
 static void sub_compute_env(ft8_subtract_t* s, const float* x, int num_samples, int n0)
 {
@@ -322,7 +217,7 @@ int ft8_subtract_signal(ft8_subtract_t* s, float* samples, int num_samples,
         for (int sh = -SUB_COARSE_RANGE; sh <= SUB_COARSE_RANGE; sh += SUB_COARSE_STEP)
         {
             float cr, ci;
-            sub_correlate(samples, num_samples, n0 + sh, s->ref_re, s->ref_im, m, &cr, &ci);
+            ft8_align_correlate(samples, num_samples, n0 + sh, s->ref_re, s->ref_im, m, &cr, &ci);
             float mag = cr * cr + ci * ci;
             if (mag > best_mag)
             {
@@ -334,11 +229,12 @@ int ft8_subtract_signal(ft8_subtract_t* s, float* samples, int num_samples,
     }
 
     /* 3. 频偏估计并调制参考 */
-    float df = sub_estimate_df(s, samples, num_samples, n0);
+    float df = ft8_align_estimate_df(samples, num_samples, s->sample_rate, s->n_spsym,
+                                     FT8_NN, s->ref_re, s->ref_im, n0);
     /* 合理范围保护：分子几百 Hz 视为估计失败 */
     if (fabsf(df) > 5.0f)
         df = 0.0f;
-    sub_modulate_ref(s, df);
+    ft8_align_modulate_ref(s->ref_re, s->ref_im, s->L, s->sample_rate, df);
 
     /* 4. 细对齐：频偏校正后 16 符号相干相关 */
     {
@@ -350,7 +246,7 @@ int ft8_subtract_signal(ft8_subtract_t* s, float* samples, int num_samples,
         for (int sh = -SUB_FINE_RANGE; sh <= SUB_FINE_RANGE; ++sh)
         {
             float cr, ci;
-            sub_correlate(samples, num_samples, n0 + sh, s->ref_re, s->ref_im, m, &cr, &ci);
+            ft8_align_correlate(samples, num_samples, n0 + sh, s->ref_re, s->ref_im, m, &cr, &ci);
             float mag = cr * cr + ci * ci;
             if (mag > best_mag)
             {

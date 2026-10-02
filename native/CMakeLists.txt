@@ -21,6 +21,7 @@ set(FT8_CORE_SOURCES
     src/fft/kiss_fftr.c
     api/ft8_thread.c
     api/ft8_hash.c
+    api/ft8_align.c
     api/ft8_gfsk.c
     api/ft8_subtract.c
     api/ft8_osd.c
