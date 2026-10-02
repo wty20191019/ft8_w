@@ -38,14 +38,15 @@
 
 /* SNR 标定：把 ft8_spectrum_snr() 的原始指标映射到 WSJT-X 参考量纲。
  *
- * P2.2 收尾口径改为「频谱噪声底」：ft8_spectrum_snr() 返回
- *     z = 10*log10(Σ正确音调功率) - sbase[f]，
- * 其中 sbase 为整时隙「无信号区域」的噪声底（ft8_spectrum_baseline）。
- * 对 test/ 全量命中与 WSJT-X 参考做斜率=1 的偏移拟合：上报 = z - 94.6。
- * 该偏移吸收信号功率/噪声底的量纲与窗归一差异（WSJT-X 原式为 -51.77）。
- * 斜率固定 1.0（全量实测 0.871，但强制 1 后 MAE 几乎不劣）。 */
-#define FT8_SNR_CALIB_SLOPE       1.0f
-#define FT8_SNR_CALIB_INTERCEPT   (-94.6f)
+ * P2.2 收尾口径为「频谱噪声底」：ft8_spectrum_snr() 返回
+ *     z = 10*log10(Σ正确音调功率) - sbase[f]。
+ * 先在 z 域做斜率=1 的偏移标定得到 x = z - 94.6；再用 test/ 全量命中对
+ * WSJT-X 参考的实测回归 ref = a*x + b（a=0.835526, b=-0.812361）做**直接回归修正**：
+ *     上报 = a*x + b = a*z + (a*(-94.6) + b)
+ * 使「参考 vs 上报」回归斜率=1、MAE 最小（3.51→3.35 dB，r1 方案）。
+ * 注：该修正会将强信号略向均值收缩，属最小误差意义下的最优标定。 */
+#define FT8_SNR_CALIB_SLOPE       0.835526f
+#define FT8_SNR_CALIB_INTERCEPT   (-79.8531f)
 
 /* 最近一次错误信息（简单全局，解码通常单调用者） */
 static char s_last_error[256];

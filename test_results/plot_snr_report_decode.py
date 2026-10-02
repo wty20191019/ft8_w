@@ -4,19 +4,23 @@
 
 对比两种上报口径：
   - 旧：JTDX 同源「7 音调平均」（test_results/snr_dump_p2_2.txt）
-  - 新：WSJT-X 同源「频谱噪声底」（test_results/snr_dump_baseline.txt，1.0/-94.6）
+  - 新：WSJT-X 同源「频谱噪声底 + 直接回归修正」
+        （test_results/snr_dump_regr.txt，标定 0.835526/-79.8531）
+  参考：仅做「斜率=1 偏移」标定的中间态 test_results/snr_dump_baseline.txt
+        （1.0/-94.6），用于对比回归修正前后的 MAE。
 
 输入：
-  - test_results/snr_dump_baseline.txt : "<上报SNR> <参考SNR> <消息文本>"
-  - test_results/snr_dump_p2_2.txt     : "<上报SNR> <参考SNR> <消息文本>"
+  - test_results/snr_dump_regr.txt     : 修正后新口径 "<上报SNR> <参考SNR> <消息文本>"
+  - test_results/snr_dump_baseline.txt : 修正前（斜率=1）新口径
+  - test_results/snr_dump_p2_2.txt     : 旧 7 音调口径
   - test/*.txt                          : 各时隙 WSJT-X 参考（期望消息，含参考 SNR）
 输出：
   - docs/images/snr_report_decode.png / .svg
 
 四联图：
-  (a) 新口径：上报 SNR vs 参考 SNR 散点 + 恒等线 + 回归；
-  (b) 偏差分布直方图（新 vs 旧）；
-  (c) 按参考 SNR 分箱的平均绝对误差（MAE，新 vs 旧）；
+  (a) 修正后新口径：上报 SNR vs 参考 SNR 散点 + 恒等线 + 回归（应近似斜率 1）；
+  (b) 偏差分布直方图（旧 vs 修正后）；
+  (c) 按参考 SNR 分箱的平均绝对误差（MAE，旧 vs 修正后）；
   (d) 解码效果：按参考 SNR 分箱的解码成功率（Recall）与样本量。
 """
 
@@ -73,10 +77,12 @@ def stats(x, y):
     }
 
 
-new_x, new_y = load_dump(os.path.join(HERE, "snr_dump_baseline.txt"))
+new_x, new_y = load_dump(os.path.join(HERE, "snr_dump_regr.txt"))
 old_x, old_y = load_dump(os.path.join(HERE, "snr_dump_p2_2.txt"))
+base_x, base_y = load_dump(os.path.join(HERE, "snr_dump_baseline.txt"))
 sn = stats(new_x, new_y)
 so = stats(old_x, old_y)
+sb = stats(base_x, base_y)
 
 # 全量期望消息的参考 SNR（用于解码成功率）
 exp_snr = []
@@ -135,14 +141,15 @@ ax0.scatter(new_x, new_y, s=14, c=C_NEW, alpha=0.28, edgecolors="none",
 ax0.set_xlim(lo, hi)
 ax0.set_ylim(lo, hi)
 ax0.set_aspect("equal", adjustable="box")
-ax0.set_xlabel("解码上报 SNR（频谱噪声底口径）/ dB")
+ax0.set_xlabel("解码上报 SNR（频谱噪声底 + 回归修正）/ dB")
 ax0.set_ylabel("WSJT-X 参考 SNR / dB")
-ax0.set_title("(a) 信号报告插值（P2.2 新口径）", fontsize=12)
+ax0.set_title("(a) 信号报告插值（P2.2 新口径 + 回归修正）", fontsize=12)
 ax0.grid(True, ls=":", alpha=0.4)
 ax0.legend(loc="upper left", fontsize=9, framealpha=0.9)
-t0 = ("n = %d\n拟合 R² = %.3f\n平均偏差 = %+.2f dB\nMAE = %.2f dB\n"
+t0 = ("n = %d\n拟合 R² = %.3f\n平均偏差 = %+.2f dB\nMAE = %.2f dB（修正前 %.2f）\n"
       "±1 dB = %.0f%%   ±2 dB = %.0f%%   ±3 dB = %.0f%%"
-      % (sn["n"], sn["r2"], sn["bias"], sn["mae"], sn["w1"], sn["w2"], sn["w3"]))
+      % (sn["n"], sn["r2"], sn["bias"], sn["mae"], sb["mae"],
+         sn["w1"], sn["w2"], sn["w3"]))
 ax0.text(0.98, 0.03, t0, transform=ax0.transAxes, ha="right", va="bottom",
          fontsize=9.5,
          bbox=dict(boxstyle="round,pad=0.45", fc="#f7f7f7", ec="#bbbbbb"))
@@ -152,7 +159,7 @@ hb = np.arange(-14, 15, 1.0)
 ax1.hist(np.clip(so["err"], hb[0], hb[-1]), bins=hb, color=C_OLD, alpha=0.55,
          edgecolor="white", label="旧 7 音调（MAE %.2f dB）" % so["mae"])
 ax1.hist(np.clip(sn["err"], hb[0], hb[-1]), bins=hb, color=C_NEW, alpha=0.70,
-         edgecolor="white", label="新 噪声底（MAE %.2f dB）" % sn["mae"])
+         edgecolor="white", label="新 噪声底+回归修正（MAE %.2f dB）" % sn["mae"])
 ax1.axvline(0.0, color=C_ID, lw=1.6, ls="--")
 ax1.axvspan(-1.0, 1.0, color=C_ID, alpha=0.10)
 ax1.set_xlabel("上报 SNR − 参考 SNR / dB")
@@ -165,7 +172,7 @@ ax1.legend(loc="upper right", fontsize=9)
 mo = mae_by_bin(old_x, old_y)
 mn = mae_by_bin(new_x, new_y)
 ax2.plot(CTR, mo, "o--", color=C_OLD, lw=1.8, ms=5, label="旧 7 音调")
-ax2.plot(CTR, mn, "s-", color=C_NEW, lw=2.0, ms=5, label="新 噪声底")
+ax2.plot(CTR, mn, "s-", color=C_NEW, lw=2.0, ms=5, label="新 噪声底+回归修正")
 ax2.axhline(so["mae"], color=C_OLD, lw=1.0, ls=":", alpha=0.8)
 ax2.axhline(sn["mae"], color=C_NEW, lw=1.0, ls=":", alpha=0.8)
 ax2.set_xlabel("参考 SNR 区间 / dB")
@@ -190,7 +197,7 @@ for c, ce, cm in zip(CTR, cnt_e, cnt_m):
                  "%d/%d" % (int(cm), int(ce)), ha="center", fontsize=7.5, color="#333")
 ax3.legend(loc="lower right", fontsize=9)
 
-fig.suptitle("FT8 信号报告插值 + 解码效果（P2.2：频谱噪声底 vs 7 音调，n=%d）"
+fig.suptitle("FT8 信号报告插值 + 解码效果（频谱噪声底 + 回归修正 vs 7 音调，n=%d）"
              % sn["n"], fontsize=14, y=0.995)
 fig.tight_layout(rect=[0, 0, 1, 0.965])
 
