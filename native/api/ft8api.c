@@ -36,13 +36,16 @@
 
 #define FT8_ENCODE_SYMBOL_BT 2.0f
 
-/* SNR 经验标定：把 ftx_compute_snr() 的原始指标映射到 JTDX/WSJT-X 量纲。
- * 由 test/ 全量 942 条命中消息对参考 SNR 做线性回归得到：
- *     snr_ref = 1.195 * raw - 26.86   (R^2 = 0.338)
- * 局限性见 docs/02-测试报告.md §7.1：本管线用 2 符号 Hann 窗瀑布，
- * 动态范围被压缩、离散偏大，精确对齐 JTDX 需逐符号频谱（P2）。 */
+/* SNR 标定：把 ft8_spectrum_snr() 的原始指标映射到 WSJT-X 参考量纲。
+ *
+ * P2.2 收尾口径改为「频谱噪声底」：ft8_spectrum_snr() 返回
+ *     z = 10*log10(Σ正确音调功率) - sbase[f]，
+ * 其中 sbase 为整时隙「无信号区域」的噪声底（ft8_spectrum_baseline）。
+ * 对 test/ 全量命中与 WSJT-X 参考做斜率=1 的偏移拟合：上报 = z - 94.6。
+ * 该偏移吸收信号功率/噪声底的量纲与窗归一差异（WSJT-X 原式为 -51.77）。
+ * 斜率固定 1.0（全量实测 0.871，但强制 1 后 MAE 几乎不劣）。 */
 #define FT8_SNR_CALIB_SLOPE       1.0f
-#define FT8_SNR_CALIB_INTERCEPT   (0.0f)
+#define FT8_SNR_CALIB_INTERCEPT   (-94.6f)
 
 /* 最近一次错误信息（简单全局，解码通常单调用者） */
 static char s_last_error[256];
@@ -296,11 +299,13 @@ typedef struct
 static bool hit_seen_before(const ftx_message_t* m, const ftx_message_t* seen, int n);
 
 /* 对单条保留命中计算时域逐符号 SNR；失败时退回瀑布域 snr_order。 */
-static void snr_batch_one(pass_hit_t* h, const float* samples, int num_samples, int sample_rate)
+static void snr_batch_one(pass_hit_t* h, const float* samples, int num_samples, int sample_rate,
+                          const float* sbase, int nbin)
 {
     uint8_t tones[FT8_NN];
     ft8_encode(h->message.payload, tones);
-    float s = ft8_spectrum_snr(samples, num_samples, sample_rate, tones, h->freq, h->time);
+    float s = ft8_spectrum_snr(samples, num_samples, sample_rate, tones, h->freq, h->time,
+                               sbase, nbin);
     h->snr_raw = (s != 0.0f) ? s : h->snr_order;
 }
 
@@ -312,6 +317,8 @@ typedef struct
     const float* samples;
     int num_samples;
     int sample_rate;
+    const float* sbase; /**< 整时隙频谱噪声底（可为 NULL） */
+    int nbin;
     int next; /**< 共享任务游标，受 lock 保护 */
     ft8_mutex_t* lock;
 } snr_batch_ctx_t;
@@ -326,14 +333,15 @@ static void snr_batch_worker(void* arg)
         ft8_mutex_unlock(c->lock);
         if (k >= c->n)
             break;
-        snr_batch_one(&c->hits[c->idx[k]], c->samples, c->num_samples, c->sample_rate);
+        snr_batch_one(&c->hits[c->idx[k]], c->samples, c->num_samples, c->sample_rate,
+                      c->sbase, c->nbin);
     }
 }
 
 /* 并行计算去重后命中的时域 SNR：每条约数十毫秒，串行会超预算，故按多线程拆分。 */
 static void compute_snr_batch(pass_hit_t* hits, const int* idx, int n,
                               const float* samples, int num_samples, int sample_rate,
-                              int num_threads)
+                              int num_threads, const float* sbase, int nbin)
 {
     if (n <= 0 || !samples || num_samples <= 0 || sample_rate <= 0)
         return;
@@ -349,12 +357,14 @@ static void compute_snr_batch(pass_hit_t* hits, const int* idx, int n,
     ctx.samples = samples;
     ctx.num_samples = num_samples;
     ctx.sample_rate = sample_rate;
+    ctx.sbase = sbase;
+    ctx.nbin = nbin;
     ctx.next = 0;
     ctx.lock = ft8_mutex_create();
     if (!ctx.lock)
     {
         for (int k = 0; k < n; ++k)
-            snr_batch_one(&hits[idx[k]], samples, num_samples, sample_rate);
+            snr_batch_one(&hits[idx[k]], samples, num_samples, sample_rate, sbase, nbin);
         return;
     }
 
@@ -589,11 +599,27 @@ static int decode_pass(const monitor_t* mon, const float* samples, int num_sampl
                 num_hits++;
             }
 
+            /* P2.2 收尾：整时隙频谱噪声底只算一次，供本遍所有命中复用 */
+            float* sbase = NULL;
+            if (samples && num_samples > 0 && sample_rate > 0)
+            {
+                sbase = (float*)malloc((size_t)FT8_SP_BASE_NBIN * sizeof(float));
+                if (sbase && ft8_spectrum_baseline(samples, num_samples, sample_rate,
+                                                   sbase, FT8_SP_BASE_NBIN) != 0)
+                {
+                    free(sbase);
+                    sbase = NULL; /* 失败则退回 JTDX 7 音调口径 */
+                }
+            }
+
             if (pass_seen && uniq)
-                compute_snr_batch(out, uniq, nuniq, samples, num_samples, sample_rate, num_threads);
+                compute_snr_batch(out, uniq, nuniq, samples, num_samples, sample_rate,
+                                  num_threads, sbase, FT8_SP_BASE_NBIN);
             else
                 for (int k = 0; k < num_hits; ++k) /* 内存不足：退化为串行且不去重 */
-                    snr_batch_one(&out[k], samples, num_samples, sample_rate);
+                    snr_batch_one(&out[k], samples, num_samples, sample_rate, sbase,
+                                  FT8_SP_BASE_NBIN);
+            free(sbase);
 
             free(uniq);
             free(pass_seen);
