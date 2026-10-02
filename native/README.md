@@ -59,23 +59,19 @@ ft8_cli bench test --threads 4 --repeat 3
 
 ## Android 集成（NDK / Gradle）
 
-在 `build.gradle` 中：
+推荐直接使用交付包 **`android/`**：内含预编译 `jniLibs/<abi>/libft8.so`（arm64-v8a /
+armeabi-v7a / x86_64）与 Kotlin 封装 `Ft8Native.kt`。源码集成用 `android/CMakeLists.txt`
+（内部 `add_subdirectory(native)`）。**完整接入说明见 `docs/05-Android移植接入文档.md`。**
 
-```gradle
+`build.gradle.kts` 示例：
+
+```kotlin
 android {
-    externalNativeBuild {
-        cmake {
-            path "../native/CMakeLists.txt"
-        }
-    }
     defaultConfig {
-        externalNativeBuild {
-            cmake {
-                arguments "-DANDROID_STL=c++_shared"
-            }
-        }
-        ndk { abiFilters "arm64-v8a" }
+        minSdk = 24
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
     }
+    externalNativeBuild { cmake { path = file("../android/CMakeLists.txt") } }
 }
 ```
 

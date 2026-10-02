@@ -1,7 +1,8 @@
-// Ft8Native.kt —— JNI 桥的 Kotlin 侧参考封装（放入 Android 工程后即可使用）
+// Ft8Native.kt —— JNI 桥的 Kotlin 侧封装（放入 Android 工程后即可使用）
 //
-// 说明：本文件为参考实现，尚未纳入 Gradle 构建。包名需与 native/jni/ft8_jni.cpp
-// 中的 JNI 函数名（Java_com_ft8_nativecore_Ft8Native_*）保持一致。
+// 说明：包名 com.ft8.nativecore 与 native/jni/ft8_jni.cpp 的 JNI 函数名
+// （Java_com_ft8_nativecore_Ft8Native_*）严格对应，两者必须同时保持。
+// 接入方式（预编译 .so 或源码 CMake）与完整 API 说明见 docs/05-Android移植接入文档.md。
 
 package com.ft8.nativecore
 
@@ -47,12 +48,15 @@ data class Ft8DecodeConfig(
     var enableSubtract: Boolean = false,
     var numThreads: Int = 4,
     var returnDuplicates: Boolean = false,
+    var osdDepth: Int = 2,
+    var enableLlrRefine: Boolean = false,
 ) {
     fun toFloatArray(): FloatArray = floatArrayOf(
         fMinHz, fMaxHz, sampleRate.toFloat(), timeOsr.toFloat(), freqOsr.toFloat(),
         maxCandidates.toFloat(), minSyncScore.toFloat(), ldpcIterations.toFloat(),
         decodeDepth.toFloat(), apMode.toFloat(), if (enableSubtract) 1f else 0f,
-        numThreads.toFloat(), if (returnDuplicates) 1f else 0f
+        numThreads.toFloat(), if (returnDuplicates) 1f else 0f,
+        osdDepth.toFloat(), if (enableLlrRefine) 1f else 0f
     )
 }
 
