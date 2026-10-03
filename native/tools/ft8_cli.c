@@ -114,6 +114,8 @@ static bool parse_option(int argc, char** argv, int* i, options_t* o)
         return next_int(argc, argv, i, &o->dec.decode_depth);
     if (strcmp(a, "--osd") == 0)
         return next_int(argc, argv, i, &o->dec.osd_depth);
+    if (strcmp(a, "--bands") == 0)
+        return next_int(argc, argv, i, &o->dec.num_bands);
     if (strcmp(a, "--fmin") == 0)
         return next_float(argc, argv, i, &o->dec.f_min_hz);
     if (strcmp(a, "--fmax") == 0)
@@ -541,7 +543,7 @@ static int cmd_bench(int argc, char** argv)
                 double x = (double)got_snr[match_j];   /* 解码 SNR（当前标定） */
                 double y = (double)expected_snr[i];     /* 参考 SNR */
                 if (fdump)
-                    fprintf(fdump, "%.4f %d %s\n", x, expected_snr[i], expected[i]);
+                    fprintf(fdump, "%s\t%.4f %d %s\n", wav, x, expected_snr[i], expected[i]);
                 snr_sum_x += x;
                 snr_sum_y += y;
                 snr_sum_xx += x * x;
