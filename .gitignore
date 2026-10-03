@@ -1,7 +1,10 @@
 # 本地参考仓库（仅用于比对算法，不纳入本仓库）
 /wsjtx/
+/jtdx/
+/ft8_lib/
 
-# ���طַ����������⣩
+# 本地分发打包（不入库）
 /dist/
-# ���� ABI ����Ŀ¼���������ﲻ��⣩
-/native/build-android-armv7/
+
+# CMake/Ninja 构建目录（构建产物不入库，可随时重新生成）
+/native/build-*/
