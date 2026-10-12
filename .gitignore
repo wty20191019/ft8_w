@@ -8,3 +8,7 @@
 
 # CMake/Ninja 构建目录（构建产物不入库，可随时重新生成）
 /native/build-*/
+
+# 宿主 CMake/Ninja 默认构建目录
+/native/build/
+/.idea/
