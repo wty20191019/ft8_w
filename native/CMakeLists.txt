@@ -39,7 +39,10 @@ target_include_directories(ft8core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/api
 )
 
-if(NOT MSVC)
+if(MSVC)
+    # 源码含 UTF-8 中文注释，须显式指定编码；并用 C11 支持 for 内声明等
+    target_compile_options(ft8core PRIVATE /utf-8 /std:c11 /W3)
+else()
     target_compile_options(ft8core PRIVATE -Wall -Wextra -Wno-unused-parameter)
     # 上游 ft8_lib 的调试日志存在 %llx 格式告警，单独屏蔽以免噪音
     set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/src/message.c
@@ -74,5 +77,7 @@ if(NOT ANDROID OR FT8_BUILD_CLI)
     endif()
     if(NOT MSVC)
         target_compile_options(ft8_cli PRIVATE -Wall -Wextra)
+    else()
+        target_compile_options(ft8_cli PRIVATE /utf-8 /std:c11 /W3)
     endif()
 endif()
