@@ -223,7 +223,7 @@ $NDK/toolchains/llvm/prebuilt/<host>/bin/llvm-strip --strip-unneeded libft8.so
 `decodeSlot` / `sessionFinalize` 每条结果为：
 
 ```
-text|snr|dt|freq|score|ldpc_errors|pass|ap_type|crc
+text|snr|dt|freq|score|ldpc_errors|pass|ap_type|crc|i3|n3|call_to|call_de|extra|grid
 ```
 
 | 字段 | 类型 | 含义 |
@@ -237,6 +237,15 @@ text|snr|dt|freq|score|ldpc_errors|pass|ap_type|crc
 | `pass` | int | 第几遍解出（0 基） |
 | `ap_type` | int | AP 类型，当前恒为 0（AP 未启用） |
 | `crc` | uint | CRC-14（可用于去重/哈希，避免依赖文本） |
+| `i3` | int | 消息类型 i3 |
+| `n3` | int | 消息类型 n3 |
+| `call_to` | string | 字段 1：接收方呼号（TO），可能含空格（如 `CQ POTA`） |
+| `call_de` | string | 字段 2：发送方呼号（DE/FROM） |
+| `extra` | string | 字段 3：扩展信息（报告/网格/73 等） |
+| `grid` | string | 网格字段（若存在），否则为空串 |
+
+> `i3` 之后的字段为 **S2 追加**，用于让上层（如 FT8CN）直接构造消息对象，
+> 无需在 Java/Kotlin 侧反解析文本。旧字段的顺序与含义保持不变。
 
 `Ft8Native` 已提供 `decode(...)` 便捷封装，返回 `List<Ft8Message>`（自动解析上述字段）。
 
@@ -397,3 +406,25 @@ val rec = AudioRecord.Builder()
 
 - 本库基于 **ft8_lib**（MIT, © 2018 Kārlis Goba）改造；算法思路参考 **WSJT-X / JTDX**。
 - 详见仓库根目录 `NOTICE`。使用时请保留相应许可声明。
+
+---
+
+## 12. FT8CN 接入（路线 C：双库并存）
+
+分支 `ft8cn-adapter` 在保留原 JNI（`com.ft8.nativecore.Ft8Native`）不变的前提下，
+为目标工程 FT8CN 追加了解码结果的结构化字段（`i3/n3/call_to/call_de/extra/grid`），
+使 FT8CN 可直接构造其 `Ft8Message` 对象，无需在 Java 侧反解析文本。
+
+接入要点：
+
+- FT8CN 侧只替换**解码路径**，新库以 `libft8.so`（`System.loadLibrary("ft8")`）与
+  原有 `libft8cn.so` 并存；两者符号前缀不同（`Java_com_ft8_nativecore_*`
+  vs `Java_com_bg7yoz_ft8cn_*`），互不冲突。
+- FT8CN 使用**整时隙**接口 `decodeSlot(samples, cfg, null, null, null)`；
+  多遍信号消除与 OSD 兜底均在库内完成，因此上层只调用一次解码、只回调一次结果。
+- 交付 ABI：`arm64-v8a`、`armeabi-v7a`、`x86_64`（不含 32 位 `x86`）。
+- 配置映射：`deepDecodeMode` → `enable_subtract/decode_depth`；
+  `num_threads = min(CPU 核数, 4)`；`osd_depth = 2`。
+- 回归（宿主机 clang、`bench test --threads 4 --subtract --depth 3 --osd 2`）：
+  命中 1062、召回 81.8%、extra 3.3%、P95 362 ms、SNR 对 WSJT-X 参考 R²=0.791，
+  与接入前基线一致。

@@ -108,3 +108,10 @@ android {
   （`enable_llr_refine`，**默认关**）实测为**负结果**（召回不变、耗时 ×2.5），仅保留实验开关 `--llr-refine`。详见 `docs/04` §3.5、`docs/02` §7.6。
 - ⏳ P1 剩余：AP 解码、分级候选。
 - ⏳ P2 剩余：NEON 优化、常驻线程池、完整比赛/遥测消息集。
+
+## 接入层（分支 `ft8cn-adapter`）
+
+- ✅ S2：解码结果 `ft8_message_result_t` 追加结构化字段
+  （`i3/n3/call_to/call_de/extra/grid`），JNI 结果串同步扩展；旧字段顺序不变。
+- ✅ S4：修复 Windows 宿主构建（MSVC `/utf-8` `/std:c11`、`stpcpy` 移植），
+  宿主 `ft8_cli` 可用；CLI 回归与基线一致（命中 1062、召回 81.8%、R²=0.791）。
