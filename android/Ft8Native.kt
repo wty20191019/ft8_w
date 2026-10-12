@@ -17,6 +17,13 @@ data class Ft8Message(
     val pass: Int,
     val apType: Int,
     val crc: Int,
+    // --- 结构化字段（S2 追加） ---
+    val i3: Int,
+    val n3: Int,
+    val callTo: String,
+    val callDe: String,
+    val extra: String,
+    val grid: String,
 )
 
 /** 编码配置（对应 ft8_encode_config_t）。 */
@@ -143,6 +150,12 @@ object Ft8Native {
             pass = p.getOrElse(6) { "0" }.toIntOrNull() ?: 0,
             apType = p.getOrElse(7) { "0" }.toIntOrNull() ?: 0,
             crc = p.getOrElse(8) { "0" }.toIntOrNull() ?: 0,
+            i3 = p.getOrElse(9) { "0" }.toIntOrNull() ?: 0,
+            n3 = p.getOrElse(10) { "0" }.toIntOrNull() ?: 0,
+            callTo = p.getOrElse(11) { "" },
+            callDe = p.getOrElse(12) { "" },
+            extra = p.getOrElse(13) { "" },
+            grid = p.getOrElse(14) { "" },
         )
     }
 }

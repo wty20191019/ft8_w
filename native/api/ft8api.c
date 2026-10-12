@@ -694,6 +694,35 @@ static bool hit_seen_before(const ftx_message_t* m, const ftx_message_t* seen, i
     return false;
 }
 
+/** 取出解码文本的第 idx 个字段（按字段偏移切分，去除尾部空格）。
+ *  offsets 由 ftx_message_decode 填充，offsets[i] < 0 表示该字段不存在。 */
+static void extract_field(const char* text, const ftx_message_offsets_t* offsets,
+                          int num_fields, int idx, char* out, int out_size)
+{
+    if (!out || out_size < 1)
+        return;
+    out[0] = '\0';
+    if (idx < 0 || idx >= num_fields)
+        return;
+    int start = offsets->offsets[idx];
+    if (start < 0)
+        return;
+
+    int len = (int)strlen(text);
+    int end = len;
+    if ((idx + 1 < FTX_MAX_MESSAGE_FIELDS) && (offsets->offsets[idx + 1] >= 0))
+        end = offsets->offsets[idx + 1];
+    while ((end > start) && (text[end - 1] == ' '))
+        --end;
+
+    int n = end - start;
+    if (n > out_size - 1)
+        n = out_size - 1;
+    if (n > 0)
+        memcpy(out, text + start, (size_t)n);
+    out[n] = '\0';
+}
+
 /** 把单遍命中格式化为对外结果。 */
 static void emit_hit(const pass_hit_t* h, int pass, ft8_message_result_t* res)
 {
@@ -719,6 +748,27 @@ static void emit_hit(const pass_hit_t* h, int pass, ft8_message_result_t* res)
     res->pass = pass;
     res->ap_type = 0;
     res->crc = h->status.crc_calculated;
+
+    /* 结构化字段：i3/n3 与按字段偏移切出的 TO / DE / EXTRA / GRID */
+    res->i3 = (int)ftx_message_get_i3(&h->message);
+    res->n3 = (int)ftx_message_get_n3(&h->message);
+    int num_fields = 0;
+    for (int i = 0; i < FTX_MAX_MESSAGE_FIELDS; ++i)
+        if (offsets.offsets[i] >= 0)
+            num_fields = i + 1;
+
+    extract_field(text, &offsets, num_fields, 0, res->call_to, (int)sizeof(res->call_to));
+    extract_field(text, &offsets, num_fields, 1, res->call_de, (int)sizeof(res->call_de));
+    extract_field(text, &offsets, num_fields, 2, res->extra, (int)sizeof(res->extra));
+
+    for (int i = 0; i < num_fields; ++i)
+    {
+        if (offsets.types[i] == FTX_FIELD_GRID)
+        {
+            extract_field(text, &offsets, num_fields, i, res->grid, (int)sizeof(res->grid));
+            break;
+        }
+    }
 }
 
 /// 在瀑布数据上执行候选搜索 + 并行解码 + 去重解包（单遍路径）。

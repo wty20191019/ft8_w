@@ -28,7 +28,7 @@
  *   }
  *
  * 结果字符串格式（每条）：
- *   text|snr|dt|freq|score|ldpc_errors|pass|ap_type|crc
+ *   text|snr|dt|freq|score|ldpc_errors|pass|ap_type|crc|i3|n3|call_to|call_de|extra|grid
  */
 #include <jni.h>
 
@@ -171,10 +171,12 @@ static jobjectArray make_result_array(JNIEnv* env, const ft8_message_result_t* r
     for (int i = 0; i < count; ++i)
     {
         const ft8_message_result_t* r = &results[i];
-        char line[256];
-        snprintf(line, sizeof(line), "%s|%.1f|%.2f|%.1f|%d|%d|%d|%d|%u",
+        char line[512];
+        snprintf(line, sizeof(line),
+                 "%s|%.1f|%.2f|%.1f|%d|%d|%d|%d|%u|%d|%d|%s|%s|%s|%s",
                  r->text, r->snr, r->dt, r->freq, r->score,
-                 r->ldpc_errors, r->pass, r->ap_type, (unsigned)r->crc);
+                 r->ldpc_errors, r->pass, r->ap_type, (unsigned)r->crc,
+                 r->i3, r->n3, r->call_to, r->call_de, r->extra, r->grid);
         jstring s = env->NewStringUTF(line);
         env->SetObjectArrayElement(arr, i, s);
         env->DeleteLocalRef(s);

@@ -36,6 +36,12 @@ extern "C"
 #define FT8API_MAX_FIELDS 3
 /** FT8 音调数 */
 #define FT8API_NUM_TONES 79
+/** 呼号字段最大长度（含结尾 NUL） */
+#define FT8API_MAX_CALL 16
+/** 扩展信息字段最大长度（含结尾 NUL） */
+#define FT8API_MAX_EXTRA 24
+/** 网格字段最大长度（含结尾 NUL） */
+#define FT8API_MAX_GRID 8
 
 /** 返回码 */
 typedef enum
@@ -113,6 +119,15 @@ typedef struct
     int      pass;                  /**< 第几遍解出（0 基） */
     int      ap_type;               /**< AP 类型，0 表示未使用 AP */
     uint16_t crc;                   /**< CRC-14 值（可用于去重/哈希） */
+
+    /* --- 结构化字段（追加于末尾，保持既有字段偏移/JNI 兼容） ---
+     * 供 FT8CN 等上层直接构造消息对象，避免在 Java 侧反解析文本。 */
+    int      i3;                        /**< 消息类型 i3 */
+    int      n3;                        /**< 消息类型 n3 */
+    char     call_to[FT8API_MAX_CALL];  /**< 字段 1：接收方呼号（TO） */
+    char     call_de[FT8API_MAX_CALL];  /**< 字段 2：发送方呼号（DE/FROM） */
+    char     extra[FT8API_MAX_EXTRA];   /**< 字段 3：扩展信息（报告/网格/73 等） */
+    char     grid[FT8API_MAX_GRID];     /**< 网格字段（若存在） */
 } ft8_message_result_t;
 
 /* ------------------------------------------------------------------------- */
