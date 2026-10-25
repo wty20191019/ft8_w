@@ -165,8 +165,8 @@ static void sp_polyfit4(const double* x, const double* y, int n, double a[5])
         a[k] = b[k];
 }
 
-int ft8_spectrum_baseline(const float* samples, int num_samples, int sample_rate,
-                          float* sbase, int nbin)
+int ft8_spectrum_baseline_n(const float* samples, int num_samples, int sample_rate,
+                            float* sbase, int nbin, int nseg)
 {
     if (!samples || !sbase || num_samples <= 0 || sample_rate <= 0 || nbin < FT8_SP_BASE_NBIN)
         return -1;
@@ -203,9 +203,18 @@ int ft8_spectrum_baseline(const float* samples, int num_samples, int sample_rate
         win[i] = (float)((double)win[i] * gain);
 
     int used = 0;
-    for (int j = 0; j < FT8_SP_BASE_NSEG; ++j)
+    if (nseg < 1)
+        nseg = 1;
+    if (nseg > FT8_SP_BASE_NSEG)
+        nseg = FT8_SP_BASE_NSEG;
+    const int step = (nseg == FT8_SP_BASE_NSEG)
+                         ? FT8_SP_BASE_STEP /* 默认口径：保持 WSJT-X 固定步长 */
+                         : ((num_samples > nfft && nseg > 1)
+                                ? (num_samples - nfft) / (nseg - 1)
+                                : nfft);
+    for (int j = 0; j < nseg; ++j)
     {
-        const int ia = j * FT8_SP_BASE_STEP;
+        const int ia = j * step;
         if (ia + nfft > num_samples)
             break;
         for (int i = 0; i < nfft; ++i)
@@ -278,6 +287,13 @@ int ft8_spectrum_baseline(const float* samples, int num_samples, int sample_rate
                            FT8_SP_BASE_PAD);
     }
     return 0;
+}
+
+int ft8_spectrum_baseline(const float* samples, int num_samples, int sample_rate,
+                          float* sbase, int nbin)
+{
+    return ft8_spectrum_baseline_n(samples, num_samples, sample_rate, sbase, nbin,
+                                   FT8_SP_BASE_NSEG);
 }
 
 float ft8_spectrum_snr(const float* samples, int num_samples, int sample_rate,
@@ -439,13 +455,57 @@ float ft8_spectrum_snr(const float* samples, int num_samples, int sample_rate,
 #define FT8_SP_DECIM_TAPER  101  /* 频带两端半余弦 taper 长度（bin） */
 #define FT8_SP_DECIM_TONE   6.25 /* 音调间隔 (Hz) */
 
+/* 长 FFT / IFFT / 32 点 FFT 的 plan 与采样率绑定，可在时隙之间复用。
+ * plan 创建约 1.4 ms（占模式 2 开销的 1/3），缓存后单时隙只付一次。
+ * 注：与库内其它全局状态（哈希表、last_error）一致，不保证多会话并发安全；
+ * 同一时隙内的 mode 2 计算是串行的。 */
+typedef struct
+{
+    int sample_rate;
+    kiss_fftr_cfg fr;
+    kiss_fft_cfg fi;
+    kiss_fft_cfg f32;
+} sp_decim_plan_t;
+
+#define SP_DECIM_PLAN_CACHE 4
+static sp_decim_plan_t s_decim_plans[SP_DECIM_PLAN_CACHE];
+static int s_decim_plan_count = 0;
+
+static const sp_decim_plan_t* sp_decim_plan_get(int sample_rate)
+{
+    for (int i = 0; i < s_decim_plan_count; ++i)
+        if (s_decim_plans[i].sample_rate == sample_rate)
+            return &s_decim_plans[i];
+    if (s_decim_plan_count >= SP_DECIM_PLAN_CACHE)
+        return NULL;
+
+    sp_decim_plan_t* p = &s_decim_plans[s_decim_plan_count];
+    p->sample_rate = sample_rate;
+    p->fr = kiss_fftr_alloc(sample_rate * 16, 0, NULL, NULL);
+    p->fi = kiss_fft_alloc(FT8_SP_DECIM_NFFT2, 1, NULL, NULL);
+    p->f32 = kiss_fft_alloc(32, 0, NULL, NULL);
+    if (!p->fr || !p->fi || !p->f32)
+    {
+        if (p->fr)
+            kiss_fftr_free(p->fr);
+        if (p->fi)
+            kiss_fft_free(p->fi);
+        if (p->f32)
+            kiss_fft_free(p->f32);
+        memset(p, 0, sizeof(*p));
+        return NULL;
+    }
+    ++s_decim_plan_count;
+    return p;
+}
+
 struct ft8_spectrum_decim
 {
     int sample_rate;
     int nfft1;
-    kiss_fftr_cfg fr;
-    kiss_fft_cfg fi;  /* 3200 点复 IFFT */
-    kiss_fft_cfg f32; /* 32 点复 FFT */
+    const sp_decim_plan_t* plan;
+    sp_decim_plan_t local_plan; /* 缓存满时的兜底 */
+    int owns_plan;
     kiss_fft_cpx* spec;
     kiss_fft_cpx* bins;
     kiss_fft_cpx* cd;
@@ -479,23 +539,34 @@ ft8_spectrum_decim_t* ft8_spectrum_decim_create(const float* samples, int num_sa
         return NULL;
     d->sample_rate = sample_rate;
     d->nfft1 = nfft1;
+    d->plan = sp_decim_plan_get(sample_rate);
+    if (!d->plan)
+    {
+        /* 缓存满：本上下文私有 plan，销毁时释放 */
+        d->local_plan.sample_rate = sample_rate;
+        d->local_plan.fr = kiss_fftr_alloc(nfft1, 0, NULL, NULL);
+        d->local_plan.fi = kiss_fft_alloc(FT8_SP_DECIM_NFFT2, 1, NULL, NULL);
+        d->local_plan.f32 = kiss_fft_alloc(32, 0, NULL, NULL);
+        if (d->local_plan.fr && d->local_plan.fi && d->local_plan.f32)
+        {
+            d->plan = &d->local_plan;
+            d->owns_plan = 1;
+        }
+    }
     d->pad = (float*)calloc((size_t)nfft1, sizeof(float));
     d->spec = (kiss_fft_cpx*)calloc((size_t)(nfft1 / 2 + 1), sizeof(kiss_fft_cpx));
     d->bins = (kiss_fft_cpx*)calloc(FT8_SP_DECIM_NFFT2, sizeof(kiss_fft_cpx));
     d->cd = (kiss_fft_cpx*)calloc(FT8_SP_DECIM_NFFT2, sizeof(kiss_fft_cpx));
     d->sym = (kiss_fft_cpx*)calloc(32, sizeof(kiss_fft_cpx));
-    d->fr = kiss_fftr_alloc(nfft1, 0, NULL, NULL);
-    d->fi = kiss_fft_alloc(FT8_SP_DECIM_NFFT2, 1, NULL, NULL);
-    d->f32 = kiss_fft_alloc(32, 0, NULL, NULL);
 
-    if (!d->pad || !d->spec || !d->bins || !d->cd || !d->sym || !d->fr || !d->fi || !d->f32)
+    if (!d->plan || !d->pad || !d->spec || !d->bins || !d->cd || !d->sym)
     {
         ft8_spectrum_decim_free(d);
         return NULL;
     }
 
     memcpy(d->pad, samples, (size_t)((num_samples < nfft1) ? num_samples : nfft1) * sizeof(float));
-    kiss_fftr(d->fr, d->pad, d->spec);
+    kiss_fftr(d->plan->fr, d->pad, d->spec);
     return d;
 }
 
@@ -503,12 +574,15 @@ void ft8_spectrum_decim_free(ft8_spectrum_decim_t* d)
 {
     if (!d)
         return;
-    if (d->fr)
-        kiss_fftr_free(d->fr);
-    if (d->fi)
-        kiss_fft_free(d->fi);
-    if (d->f32)
-        kiss_fft_free(d->f32);
+    if (d->owns_plan)
+    {
+        if (d->local_plan.fr)
+            kiss_fftr_free(d->local_plan.fr);
+        if (d->local_plan.fi)
+            kiss_fft_free(d->local_plan.fi);
+        if (d->local_plan.f32)
+            kiss_fft_free(d->local_plan.f32);
+    }
     free(d->pad);
     free(d->spec);
     free(d->bins);
@@ -573,7 +647,7 @@ float ft8_spectrum_snr_decim(ft8_spectrum_decim_t* d, const uint8_t* tones,
         d->bins[dst].r = d->spec[src].r * w;
         d->bins[dst].i = d->spec[src].i * w;
     }
-    kiss_fft(d->fi, d->bins, d->cd);
+    kiss_fft(d->plan->fi, d->bins, d->cd);
 
     /* 时间精化：瀑布候选的 dt 量化误差最大约 ±1/(2*time_osr) 符号，
      * 在 ±16 样本（±80 ms）内按 Costas 功率找峰。 */
@@ -606,7 +680,7 @@ float ft8_spectrum_snr_decim(ft8_spectrum_decim_t* d, const uint8_t* tones,
             continue;
         for (int n = 0; n < FT8_SP_DECIM_NSPS; ++n)
             d->sym[n] = d->cd[base + n];
-        kiss_fft(d->f32, d->sym, d->sym);
+        kiss_fft(d->plan->f32, d->sym, d->sym);
         const kiss_fft_cpx v = d->sym[tones[sym] & 7];
         sum_sig += (double)v.r * (double)v.r + (double)v.i * (double)v.i;
     }

@@ -55,11 +55,11 @@
 #define FT8_SNR_FAST_INTERCEPT    (-27.4176f)
 
 /* P4 抽取 SNR 标定：snr_mode==2 时为「下变频 + 3200 点 IFFT + 32 点 FFT」的
- * z = 10log10(Σsig) - sbase。因抽取/FFT 归一化与全速率 Goertzel 不同，需单独
- * 标定：test/ 全量 981 条命中对 WSJT-X 参考回归 ref = 0.818424*z - 130.0468，
- * MAE 3.27 dB、R²=0.812（全速率模式为 3.32 dB / 0.791）。 */
-#define FT8_SNR_DECIM_SLOPE       0.818424f
-#define FT8_SNR_DECIM_INTERCEPT   (-130.0468f)
+ * z = 10log10(Σsig) - sbase（sbase 用 47 段快速估计）。因抽取/FFT 归一化与
+ * 全速率 Goertzel 不同，需单独标定：test/ 全量 981 条命中对 WSJT-X 参考回归
+ * ref = 0.839005*z - 133.829，MAE 3.23 dB、R²=0.815（全速率模式 3.32 dB / 0.791）。 */
+#define FT8_SNR_DECIM_SLOPE       0.839005f
+#define FT8_SNR_DECIM_INTERCEPT   (-133.829f)
 
 /* 最近一次错误信息（简单全局，解码通常单调用者） */
 static char s_last_error[256];
@@ -671,8 +671,17 @@ static int decode_pass(const monitor_t* mon, const float* samples, int num_sampl
                 samples && num_samples > 0 && sample_rate > 0)
             {
                 sbase = (float*)malloc((size_t)FT8_SP_BASE_NBIN * sizeof(float));
-                if (sbase && ft8_spectrum_baseline(samples, num_samples, sample_rate,
-                                                   sbase, FT8_SP_BASE_NBIN) != 0)
+                int brc = -1;
+                if (sbase)
+                {
+                    brc = (cfg->snr_mode == 2)
+                              ? ft8_spectrum_baseline_n(samples, num_samples, sample_rate,
+                                                        sbase, FT8_SP_BASE_NBIN,
+                                                        FT8_SP_BASE_NSEG_FAST)
+                              : ft8_spectrum_baseline(samples, num_samples, sample_rate,
+                                                      sbase, FT8_SP_BASE_NBIN);
+                }
+                if (brc != 0)
                 {
                     free(sbase);
                     sbase = NULL; /* 失败则退回 JTDX 7 音调口径 */

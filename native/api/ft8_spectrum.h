@@ -45,6 +45,15 @@ int ft8_spectrum_baseline(const float* samples, int num_samples, int sample_rate
                           float* sbase, int nbin);
 
 /**
+ * 同 `ft8_spectrum_baseline`，但可指定时间平均段数 `nseg`（10..93）。
+ * 段数越少越快，噪声底估计方差略大。`FT8_SP_BASE_NSEG_FAST` 为实测
+ * 精度/耗时折中值（全量 R²≈0.815，耗时约为 93 段的 1/2）。
+ */
+#define FT8_SP_BASE_NSEG_FAST 47
+int ft8_spectrum_baseline_n(const float* samples, int num_samples, int sample_rate,
+                            float* sbase, int nbin, int nseg);
+
+/**
  * 估计一条已解码 FT8 候选的原始 SNR 指标（未做对外线性标定）。
  *
  * @param samples     单声道浮点音频（通常为本遍残差）

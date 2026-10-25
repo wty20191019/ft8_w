@@ -57,7 +57,8 @@ ft8_cli bench test --threads 4 --repeat 3
 
 > `--osd N` 为 OSD 兜底译码阶数（0=关闭，1..3；**默认 2**），详见 `docs/04-P2-解码深度设计.md` §4.7。
 > `--snr-mode N`：0=全速率 Goertzel（默认，历史行为）；1=瀑布域快速（`--fast-snr`）；
-> 2=下变频抽取 + 32 点 FFT（WSJT-X 同源结构，精度≈模式 0，单条约 0.05 ms）。
+> 2=下变频抽取 + 32 点 FFT（WSJT-X 同源结构；R²=0.816 / MAE 3.22 dB，
+> 单条 0.05 ms、整时隙约 3.2 ms）。
 > 三种模式都不改变解码文本；详见 `test_results/sweep_efficiency_report.md`。
 
 ## Android 集成（NDK / Gradle）
