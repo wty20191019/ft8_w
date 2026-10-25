@@ -742,9 +742,14 @@ def main():
     ap = argparse.ArgumentParser(description="FT8 解码参数调优台")
     ap.add_argument("--exe", default="", help="ft8_cli 路径")
     ap.add_argument("--data", default=str(DEFAULT_DATA), help="测试集目录")
+    ap.add_argument("--self-test", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args()
 
     exe = args.exe or discover_exe()
+    if args.self_test:
+        print(f"ok exe={exe} data={args.data}")
+        return
+
     root = tk.Tk()
     app = TunerApp(root, exe, args.data)
     if not exe:
