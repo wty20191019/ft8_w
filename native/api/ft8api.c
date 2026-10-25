@@ -48,6 +48,12 @@
 #define FT8_SNR_CALIB_SLOPE       0.835526f
 #define FT8_SNR_CALIB_INTERCEPT   (-79.8531f)
 
+/* P4 快速 SNR 标定：snr_mode==1 时上报的原始量是瀑布域 snr_order（P1 口径），
+ * 用 test/ 全量命中（推荐配置，n=981）对 WSJT-X 参考回归得到 ref = 1.223*raw - 27.4176。
+ * 精度明显低于精确口径（MAE≈7.0 dB vs 3.3 dB），仅用于“时间优先”配置。 */
+#define FT8_SNR_FAST_SLOPE        1.223f
+#define FT8_SNR_FAST_INTERCEPT    (-27.4176f)
+
 /* 最近一次错误信息（简单全局，解码通常单调用者） */
 static char s_last_error[256];
 
@@ -94,6 +100,8 @@ void ft8_decode_config_default(ft8_decode_config_t* cfg)
     cfg->osd_depth = 2; /**< 默认启用 OSD 2 阶（历史数据：+14 命中 / extra 3.3%） */
     cfg->enable_llr_refine = false; /**< P2.3 实验项，默认关闭 */
     cfg->num_bands = 1; /**< P3：默认不分段，保持既有单段行为 */
+    cfg->snr_mode = 0;  /**< P4：默认精确 SNR（频谱噪声底口径），保持既有行为 */
+    cfg->subtract_max_signals = 0; /**< P4：默认消除全部新增信号，保持既有行为 */
 }
 
 void ft8_encode_config_default(ft8_encode_config_t* cfg)
@@ -647,9 +655,12 @@ static int decode_pass(const monitor_t* mon, const float* samples, int num_sampl
                 num_hits++;
             }
 
-            /* P2.2 收尾：整时隙频谱噪声底只算一次，供本遍所有命中复用 */
+            /* P2.2 收尾：整时隙频谱噪声底只算一次，供本遍所有命中复用。
+             * P4：snr_mode==1 时跳过全部高精度 SNR 计算（噪声底 + 逐命中
+             * 时域 Goertzel），直接复用瀑布域 snr_order。解码文本不变。 */
             float* sbase = NULL;
-            if (samples && num_samples > 0 && sample_rate > 0)
+            if (cfg->snr_mode == 0 && num_hits > 0 &&
+                samples && num_samples > 0 && sample_rate > 0)
             {
                 sbase = (float*)malloc((size_t)FT8_SP_BASE_NBIN * sizeof(float));
                 if (sbase && ft8_spectrum_baseline(samples, num_samples, sample_rate,
@@ -660,7 +671,12 @@ static int decode_pass(const monitor_t* mon, const float* samples, int num_sampl
                 }
             }
 
-            if (pass_seen && uniq)
+            if (cfg->snr_mode != 0)
+            {
+                for (int k = 0; k < num_hits; ++k)
+                    out[k].snr_raw = out[k].snr_order;
+            }
+            else if (pass_seen && uniq)
                 compute_snr_batch(out, uniq, nuniq, samples, num_samples, sample_rate,
                                   num_threads, sbase, FT8_SP_BASE_NBIN);
             else
@@ -724,7 +740,7 @@ static void extract_field(const char* text, const ftx_message_offsets_t* offsets
 }
 
 /** 把单遍命中格式化为对外结果。 */
-static void emit_hit(const pass_hit_t* h, int pass, ft8_message_result_t* res)
+static void emit_hit(const pass_hit_t* h, int pass, int snr_mode, ft8_message_result_t* res)
 {
     memset(res, 0, sizeof(*res));
 
@@ -735,7 +751,9 @@ static void emit_hit(const pass_hit_t* h, int pass, ft8_message_result_t* res)
         snprintf(text, sizeof(text), "Error [%d] while unpacking!", (int)urc);
     snprintf(res->text, sizeof(res->text), "%s", text);
 
-    float snr = FT8_SNR_CALIB_SLOPE * h->snr_raw + FT8_SNR_CALIB_INTERCEPT;
+    float snr = (snr_mode != 0)
+                    ? FT8_SNR_FAST_SLOPE * h->snr_raw + FT8_SNR_FAST_INTERCEPT
+                    : FT8_SNR_CALIB_SLOPE * h->snr_raw + FT8_SNR_CALIB_INTERCEPT;
     if (snr < -24.0f)
         snr = -24.0f; /* 与 JTDX 一致的显示下限 */
     if (snr > 49.0f)
@@ -811,7 +829,7 @@ static int decode_from_monitor(monitor_t* mon, const float* samples, int num_sam
             seen[num_seen++] = hits[i].message;
 
         if (out && num_results < max_out)
-            emit_hit(&hits[i], 0, &out[num_results]);
+            emit_hit(&hits[i], 0, cfg->snr_mode, &out[num_results]);
         num_results++;
     }
 
@@ -898,7 +916,7 @@ static int decode_slot_multipass(monitor_t* mon, const float* samples, int num_s
             {
                 if (cfg->return_duplicates && out && num_results < max_out)
                 {
-                    emit_hit(&hits[i], pass, &out[num_results]);
+                    emit_hit(&hits[i], pass, cfg->snr_mode, &out[num_results]);
                     num_results++;
                 }
                 continue;
@@ -906,7 +924,7 @@ static int decode_slot_multipass(monitor_t* mon, const float* samples, int num_s
             seen[num_seen++] = hits[i].message;
             new_idx[nnew++] = i;
             if (out && num_results < max_out)
-                emit_hit(&hits[i], pass, &out[num_results]);
+                emit_hit(&hits[i], pass, cfg->snr_mode, &out[num_results]);
             num_results++;
         }
 
@@ -928,7 +946,10 @@ static int decode_slot_multipass(monitor_t* mon, const float* samples, int num_s
                 }
             }
         }
-        for (int a = 0; a < nnew; ++a)
+        int nsub = nnew;
+        if (cfg->subtract_max_signals > 0 && cfg->subtract_max_signals < nsub)
+            nsub = cfg->subtract_max_signals; /* P4：只消除最强的 N 条，控制相减成本 */
+        for (int a = 0; a < nsub; ++a)
         {
             const pass_hit_t* h = &hits[new_idx[a]];
             ft8_encode(h->message.payload, tones);

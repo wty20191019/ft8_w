@@ -17,6 +17,11 @@
  *   --fmin HZ       频率下限（默认 200）
  *   --fmax HZ       频率上限（默认 3000）
  *   --repeat N      基准重复次数（默认 1）
+ *   --subtract      启用多遍信号消除（配合 --depth 指定遍数）
+ *   --depth N       多遍消除遍数（默认 3）
+ *   --osd N         OSD 兜底译码阶数（默认 2，0=关闭）
+ *   --fast-snr      跳过时域高精度 SNR，仅用瀑布域快速口径（解码结果不变）
+ *   --sub-top N     每遍最多消除最强 N 条信号（0=全部，控制相减成本）
  */
 #include "ft8api.h"
 #include "common/wave.h"
@@ -130,6 +135,13 @@ static bool parse_option(int argc, char** argv, int* i, options_t* o)
         o->dec.enable_llr_refine = true;
         return true;
     }
+    if (strcmp(a, "--fast-snr") == 0)
+    {
+        o->dec.snr_mode = 1;
+        return true;
+    }
+    if (strcmp(a, "--sub-top") == 0)
+        return next_int(argc, argv, i, &o->dec.subtract_max_signals);
     return false;
 }
 

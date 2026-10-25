@@ -58,6 +58,8 @@ enum
     DC_RETURN_DUPLICATES,
     DC_OSD_DEPTH,
     DC_ENABLE_LLR_REFINE,
+    DC_SNR_MODE,
+    DC_SUBTRACT_MAX_SIGNALS,
     DC_COUNT
 };
 
@@ -132,6 +134,8 @@ static void read_decode_cfg(JNIEnv* env, jfloatArray arr, ft8_decode_config_t* c
     if (n > DC_RETURN_DUPLICATES) cfg->return_duplicates = buf[DC_RETURN_DUPLICATES] != 0.0f;
     if (n > DC_OSD_DEPTH) cfg->osd_depth = (int)buf[DC_OSD_DEPTH];
     if (n > DC_ENABLE_LLR_REFINE) cfg->enable_llr_refine = buf[DC_ENABLE_LLR_REFINE] != 0.0f;
+    if (n > DC_SNR_MODE) cfg->snr_mode = (int)buf[DC_SNR_MODE];
+    if (n > DC_SUBTRACT_MAX_SIGNALS) cfg->subtract_max_signals = (int)buf[DC_SUBTRACT_MAX_SIGNALS];
 }
 
 static void read_encode_cfg(JNIEnv* env, jfloatArray arr, ft8_encode_config_t* cfg)
@@ -234,6 +238,8 @@ Java_com_ft8_nativecore_Ft8Native_decodeConfigDefault(JNIEnv* env, jclass)
     buf[DC_RETURN_DUPLICATES] = cfg.return_duplicates ? 1.0f : 0.0f;
     buf[DC_OSD_DEPTH] = (float)cfg.osd_depth;
     buf[DC_ENABLE_LLR_REFINE] = cfg.enable_llr_refine ? 1.0f : 0.0f;
+    buf[DC_SNR_MODE] = (float)cfg.snr_mode;
+    buf[DC_SUBTRACT_MAX_SIGNALS] = (float)cfg.subtract_max_signals;
 
     jfloatArray arr = env->NewFloatArray(DC_COUNT);
     if (arr)

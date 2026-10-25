@@ -57,13 +57,16 @@ data class Ft8DecodeConfig(
     var returnDuplicates: Boolean = false,
     var osdDepth: Int = 2,
     var enableLlrRefine: Boolean = false,
+    var snrMode: Int = 0,
+    var subtractMaxSignals: Int = 0,
 ) {
     fun toFloatArray(): FloatArray = floatArrayOf(
         fMinHz, fMaxHz, sampleRate.toFloat(), timeOsr.toFloat(), freqOsr.toFloat(),
         maxCandidates.toFloat(), minSyncScore.toFloat(), ldpcIterations.toFloat(),
         decodeDepth.toFloat(), apMode.toFloat(), if (enableSubtract) 1f else 0f,
         numThreads.toFloat(), if (returnDuplicates) 1f else 0f,
-        osdDepth.toFloat(), if (enableLlrRefine) 1f else 0f
+        osdDepth.toFloat(), if (enableLlrRefine) 1f else 0f,
+        snrMode.toFloat(), subtractMaxSignals.toFloat()
     )
 }
 
