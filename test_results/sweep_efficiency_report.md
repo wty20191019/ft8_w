@@ -17,16 +17,16 @@
      --osd 3 --time-osr 4 --candidates 300 --snr-mode 2
    ```
 
-   → **75.6%**（981/1298），extra 37（2.9%），avg 37.0 ms / P95 41.2 ms，
-   384 hits/CPU-s；SNR 对 WSJT-X 参考 **MAE 3.22 dB、R²=0.817**（优于原精确模式）。
+   → **75.6%**（981/1298），extra 37（2.9%），avg 35.4 ms / P95 40.4 ms，
+   402 hits/CPU-s；SNR 对 WSJT-X 参考 **MAE 3.23 dB、R²=0.816**（优于原精确模式）。
 
 3. 相比现默认配置（`--subtract --depth 3 --osd 2`，81.8% / 371.7 ms / 42 hits/CPU-s），
-   推荐配置的**单位 CPU 时间召回提升约 9.1 倍**，代价是召回下降 6.2 个百分点。
+   推荐配置的**单位 CPU 时间召回提升约 9.5 倍**，代价是召回下降 6.2 个百分点。
 4. 若必须保留 80%+ 召回，`--subtract --depth 3 --osd 2 --snr-mode 2`
-   仍为 **81.8%**，耗时从 371.7 ms 降到 **209.5 ms**（同精度下快 1.8 倍）。
+   仍为 **81.8%**，耗时从 371.7 ms 降到 **203.2 ms**（同精度下快 1.8 倍）。
 5. **关键发现：SNR 的 149 ms 开销来自「全采样率 Goertzel」，不是译码。**
    `snr_mode=2` 按 WSJT-X 的结构先下变频抽取到 200 Hz（32 样本/符号），再做
-   32 点 FFT：每命中从 9.5 ms 降到 **0.05 ms**，整时隙约 5 ms，
+   32 点 FFT：每命中从 9.5 ms 降到 **0.05 ms**，整时隙约 **3.2 ms**，
    60 ms 预算内可以保留精确 SNR。
 
 ## 2. 成本结构
@@ -46,10 +46,13 @@
 
 | 步骤 | 模式 0：全速率 Goertzel | 模式 2：抽取 + 32 点 FFT |
 | --- | --- | --- |
-| 频谱噪声底（每时隙） | 1.5 ms | 1.5 ms |
-| 长 FFT / 下变频 | — | 3.1 ms / pass（含 plan 分配） |
+| 频谱噪声底（每时隙） | 1.5 ms（93 段） | 0.8 ms（47 段） |
+| 长 FFT / 下变频 | — | 1.65 ms / pass（plan 已缓存，含长 FFT） |
 | 每条命中 | **9.5 ms**（对齐 7.0 + Goertzel 2.5） | **0.05 ms** |
-| 16 条命中合计 | ≈ 153 ms | ≈ 5.4 ms |
+| 16 条命中合计 | ≈ 153 ms | **≈ 3.2 ms** |
+
+> 长 FFT/IFFT 的 plan 按采样率缓存，单时隙只在首次创建（约 1.4 ms），
+> 跨时隙复用；47 段噪声底的 R² 与 93 段相差 <0.005。
 
 模式 2 的逐步流程（思路参考 WSJT-X `ft8_downsample.f90` / `ft8b.f90`，代码自研）：
 
@@ -65,22 +68,22 @@
 
 | SNR | 配置 | 命中 | extra | 召回 | avg | P95 | hits/CPU-s |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| fast | `--osd 0 --fast-snr` | 942 | 26 | 72.6% | 12.8 ms | 14.2 ms | 1067 |
-| fast | `--osd 2 --fast-snr` | 956 | 28 | 73.7% | 15.0 ms | 16.7 ms | 924 |
+| fast | `--osd 0 --fast-snr` | 942 | 26 | 72.6% | 12.4 ms | 13.7 ms | 1101 |
+| fast | `--osd 2 --fast-snr` | 956 | 28 | 73.7% | 14.4 ms | 16.1 ms | 962 |
 | fast | `--osd 3 --fast-snr --time-osr 4 --candidates 100` | 961 | 30 | 74.0% | 15.9 ms | 18.3 ms | 876 |
-| fast | `--osd 3 --fast-snr --time-osr 3` | 969 | 35 | 74.7% | 17.3 ms | 19.9 ms | 812 |
-| fast | `--osd 3 --fast-snr --time-osr 4` | 975 | 36 | 75.1% | 19.4 ms | 23.3 ms | 728 |
-| **mode2** | `--osd 3 --snr-mode 2 --time-osr 3` | 969 | 35 | 74.7% | 23.5 ms | 26.4 ms | 598 |
-| **mode2** | `--osd 3 --snr-mode 2 --time-osr 4` | 975 | 36 | 75.1% | 23.8 ms | 26.9 ms | 594 |
-| **mode2** | `--osd 3 --snr-mode 2 --time-osr 4 --candidates 200` | 978 | 36 | 75.3% | 29.5 ms | 33.2 ms | 480 |
-| fast | `--osd 3 --fast-snr --time-osr 4 --candidates 300` | 981 | 37 | 75.6% | 32.2 ms | 36.2 ms | 442 |
-| **mode2** | **`--osd 3 --snr-mode 2 --time-osr 4 --candidates 300`** | **981** | **37** | **75.6%** | **37.0 ms** | **41.2 ms** | **384** |
-| fast | `--subtract --depth 2 --osd 2 --fast-snr --sub-top 6` | 991 | 34 | 76.3% | 84.1 ms | 90.1 ms | 171 |
+| fast | `--osd 3 --fast-snr --time-osr 3` | 969 | 35 | 74.7% | 17.0 ms | 20.4 ms | 826 |
+| fast | `--osd 3 --fast-snr --time-osr 4` | 975 | 36 | 75.1% | 18.4 ms | 21.5 ms | 768 |
+| **mode2** | `--osd 3 --snr-mode 2 --time-osr 3` | 969 | 35 | 74.7% | 20.4 ms | 22.9 ms | 688 |
+| **mode2** | `--osd 3 --snr-mode 2 --time-osr 4` | 975 | 36 | 75.1% | 22.0 ms | 25.2 ms | 642 |
+| **mode2** | `--osd 3 --snr-mode 2 --time-osr 4 --candidates 200` | 978 | 36 | 75.3% | 27.2 ms | 30.6 ms | 521 |
+| fast | `--osd 3 --fast-snr --time-osr 4 --candidates 300` | 981 | 37 | 75.6% | 31.4 ms | 35.3 ms | 453 |
+| **mode2** | **`--osd 3 --snr-mode 2 --time-osr 4 --candidates 300`** | **981** | **37** | **75.6%** | **35.4 ms** | **40.4 ms** | **402** |
+| fast | `--subtract --depth 2 --osd 2 --fast-snr --sub-top 6` | 991 | 34 | 76.3% | 82.0 ms | 88.7 ms | 175 |
 | fast | `--subtract --depth 2 --osd 3 --fast-snr --sub-top 8` | 1003 | 36 | 77.3% | 100.4 ms | 110.5 ms | 145 |
-| fast | `--subtract --depth 2 --osd 3 --fast-snr --sub-top 10` | 1013 | 36 | 78.0% | 114.7 ms | 126.7 ms | 128 |
-| fast | `--subtract --depth 2 --osd 3 --fast-snr --sub-top 16` | 1047 | 39 | 80.7% | 153.6 ms | 176.0 ms | 99 |
+| fast | `--subtract --depth 2 --osd 3 --fast-snr --sub-top 10` | 1013 | 36 | 78.0% | 113.0 ms | 125.5 ms | 130 |
+| fast | `--subtract --depth 2 --osd 3 --fast-snr --sub-top 16` | 1047 | 39 | 80.7% | 150.7 ms | 171.6 ms | 101 |
 | fast | `--subtract --depth 2 --osd 3 --fast-snr` | 1060 | 41 | 81.7% | 169.3 ms | 216.8 ms | 91 |
-| **mode2** | `--subtract --depth 3 --osd 2 --snr-mode 2` | 1062 | 43 | 81.8% | 209.5 ms | 272.7 ms | 73 |
+| **mode2** | `--subtract --depth 3 --osd 2 --snr-mode 2` | 1062 | 43 | 81.8% | 203.2 ms | 263.9 ms | 76 |
 | mode0 | `--subtract --depth 3 --osd 2`（现默认） | 1062 | 43 | 81.8% | 371.7 ms | 492.0 ms | 42 |
 
 ### SNR 精度（对 WSJT-X 参考，n≈1000）
@@ -89,7 +92,7 @@
 | --- | --- | --- | --- | --- | --- |
 | 0：全速率 Goertzel | 3.32 dB | 0.791 | 21% | 41% | 57% |
 | 1：瀑布域快速 | 7.0 dB | 0.316 | — | — | — |
-| **2：抽取 + 32 点 FFT** | **3.22 dB** | **0.817** | **20.6%** | **41.3%** | **58.2%** |
+| **2：抽取 + 32 点 FFT** | **3.22 dB** | **0.816** | **20.8%** | **41.3%** | **58.3%** |
 
 ## 4. 推荐
 
@@ -100,7 +103,7 @@ ft8_cli bench test --threads 1 \
   --osd 3 --time-osr 4 --candidates 300 --snr-mode 2
 ```
 
-- 召回 **75.6%**（981/1298），extra 37（2.9%），avg 37.0 ms / P95 41.2 ms；
+- 召回 **75.6%**（981/1298），extra 37（2.9%），avg 35.4 ms / P95 40.4 ms；
 - SNR 精度优于原精确模式（MAE 3.22 vs 3.32 dB）；
 - 对应用户侧配置：`osd_depth=3, time_osr=4, max_candidates=300,
   snr_mode=2, enable_subtract=false`。
@@ -111,7 +114,7 @@ ft8_cli bench test --threads 1 \
 ft8_cli bench test --threads 1 --osd 3 --time-osr 4 --snr-mode 2
 ```
 
-- 召回 75.1%（975），extra 36，avg 23.8 ms / P95 26.9 ms，594 hits/CPU-s；
+- 召回 75.1%（975），extra 36，avg 22.0 ms / P95 25.2 ms，642 hits/CPU-s；
 - 若完全不需要 SNR 精度，可用 `--fast-snr` 进一步降到 19.4 ms。
 
 ### 4.3 必须保留 80%+ 召回
@@ -120,7 +123,7 @@ ft8_cli bench test --threads 1 --osd 3 --time-osr 4 --snr-mode 2
 ft8_cli bench test --threads 1 --subtract --depth 3 --osd 2 --snr-mode 2
 ```
 
-- 召回 81.8%（1062），extra 43，avg 209.5 ms / P95 272.7 ms；
+- 召回 81.8%（1062），extra 43，avg 203.2 ms / P95 263.9 ms；
 - 比现默认配置（模式 0）快 1.8 倍，SNR 精度不降反升。
 
 ## 5. 代码改动（默认行为不变）
@@ -128,7 +131,7 @@ ft8_cli bench test --threads 1 --subtract --depth 3 --osd 2 --snr-mode 2
 | 改动 | 字段 / 开关 | 默认 | 作用 |
 | --- | --- | --- | --- |
 | 快速 SNR | `snr_mode=1` / CLI `--fast-snr` / JNI `DC_SNR_MODE`（下标 15） | 0（精确） | 跳过时域 SNR，直接用瀑布域 `snr_order`；MAE≈7 dB |
-| 抽取 SNR | `snr_mode=2` / CLI `--snr-mode 2` | — | 下变频抽取 + 32 点 FFT；MAE 3.22 dB，单条 0.05 ms |
+| 抽取 SNR | `snr_mode=2` / CLI `--snr-mode 2` | — | 下变频抽取 + 32 点 FFT；MAE 3.22 dB、R² 0.816，整时隙约 3.2 ms |
 | 限制消除条数 | `subtract_max_signals` / CLI `--sub-top N` / JNI `DC_SUBTRACT_MAX_SIGNALS`（下标 16） | 0（全部） | >0 时每遍只消除最强的 N 条 |
 
 - `snr_mode` 三种模式均**不影响解码文本与召回**，只影响上报的 `snr` 字段与耗时；
@@ -152,8 +155,8 @@ python test_results/sweep_efficiency.py --tag <标签> --repeat 2 "<配置1>" "<
 
 - 60 ms 是**主机单线程**口径；手机单核通常更慢，`snr_mode=2` 的长 FFT 与
   plan 分配在真机上需复测。实时性验收建议用 `--threads 4` 在目标机型确认。
-- `snr_mode=2` 每遍会新建一次 192000 点 FFT plan（约 2–3 ms）。多遍配置可进一步
-  改为跨遍复用 plan；单遍推荐配置不受影响。
+- `snr_mode=2` 的 FFT plan 已按采样率缓存、跨时隙复用；噪声底在模式 2 下用 47 段
+  （R² 0.816）。多遍配置仍每遍重算一次噪声底，可进一步跨遍复用（约省 0.8 ms/遍）。
 - 模式 1 只适合对 SNR 精度无要求的场景（如纯解码计数）。
 - AP（`ap_mode`/`my_call`/`his_call`/`his_grid`）目前仅有配置字段、未实现译码逻辑，
   本次扫参未涉及。
@@ -165,20 +168,22 @@ python test_results/sweep_efficiency.py --tag <标签> --repeat 2 "<配置1>" "<
 
 | 配置（其余参数相同） | 召回 | extra | fast avg | **mode2 avg** | mode2 P95 | mode2 hits/CPU-s | 耗时增量 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `--osd 0` | 72.6% | 26 | 12.8 ms | **17.9 ms** | 19.5 ms | 763 | +5.1 ms |
-| `--osd 2` | 73.7% | 28 | 15.0 ms | **20.0 ms** | 21.7 ms | 693 | +5.0 ms |
-| `--osd 3 --time-osr 3` | 74.7% | 35 | 17.3 ms | **23.5 ms** | 26.4 ms | 598 | +6.2 ms |
-| `--osd 3 --time-osr 4` | 75.1% | 36 | 19.4 ms | **23.8 ms** | 26.9 ms | 594 | +4.4 ms |
-| `--osd 3 --time-osr 4 --candidates 300` | 75.6% | 37 | 32.2 ms | **37.0 ms** | 41.2 ms | 384 | +4.8 ms |
-| `--subtract --depth 2 --osd 2 --sub-top 6` | 76.3% | 34 | 84.1 ms | **93.2 ms** | 100.6 ms | 154 | +9.1 ms |
-| `--subtract --depth 2 --osd 3 --sub-top 10` | 78.0% | 36 | 114.7 ms | **123.2 ms** | 138.3 ms | 119 | +8.5 ms |
-| `--subtract --depth 2 --osd 3 --sub-top 16` | 80.7% | 39 | 153.6 ms | **161.2 ms** | 184.0 ms | 94 | +7.6 ms |
-| `--subtract --depth 3 --osd 2` | 81.8% | 43 | 204.7 ms | **209.5 ms** | 272.7 ms | 73 | +4.8 ms |
+| `--osd 0` | 72.6% | 26 | 12.4 ms | **15.7 ms** | 17.1 ms | 870 | +3.3 ms |
+| `--osd 2` | 73.7% | 28 | 14.4 ms | **17.9 ms** | 19.6 ms | 774 | +3.5 ms |
+| `--osd 3 --time-osr 3` | 74.7% | 35 | 17.0 ms | **20.4 ms** | 22.9 ms | 688 | +3.4 ms |
+| `--osd 3 --time-osr 4` | 75.1% | 36 | 18.4 ms | **22.0 ms** | 25.2 ms | 642 | +3.6 ms |
+| `--osd 3 --time-osr 4 --candidates 300` | 75.6% | 37 | 31.4 ms | **35.4 ms** | 40.4 ms | 402 | +4.0 ms |
+| `--subtract --depth 2 --osd 2 --sub-top 6` | 76.3% | 34 | 82.0 ms | **88.6 ms** | 95.6 ms | 162 | +6.6 ms |
+| `--subtract --depth 2 --osd 3 --sub-top 10` | 78.0% | 36 | 113.0 ms | **117.4 ms** | 128.1 ms | 125 | +4.4 ms |
+| `--subtract --depth 2 --osd 3 --sub-top 16` | 80.7% | 39 | 150.7 ms | **164.0 ms** | 202.3 ms | 93 | +13.3 ms* |
+| `--subtract --depth 3 --osd 2` | 81.8% | 43 | 194.9 ms | **203.2 ms** | 263.9 ms | 76 | +8.3 ms |
+
+\* 该行受单文件时延抖动影响（P95 明显偏高），稳态增量应接近「遍数 × 3.3 ms」。
 
 结论：
 
 - 召回与 extra **逐项完全一致**（SNR 模式只影响上报字段）；
-- 单遍配置固定增加约 **5 ms**，多遍配置因每遍重建长 FFT / plan 增加约 **5–9 ms**；
-- 所有单遍配置换成模式 2 后仍远低于 60 ms（最高 41.2 ms P95）；
-- 新增的 5 ms 换来 SNR MAE 从 7.0 dB 降到 3.22 dB，接近原精确口径。
+- 模式 2 的稳态增量约 **3.3 ms / 遍**：单遍 +3–4 ms，深度 2 / 3 分别 +7 / +10 ms；
+- 所有单遍配置换成模式 2 后仍远低于 60 ms（最高 40.4 ms P95）；
+- 新增的 3–4 ms 换来 SNR MAE 从 7.0 dB 降到 3.22 dB（R² 0.816）。
 

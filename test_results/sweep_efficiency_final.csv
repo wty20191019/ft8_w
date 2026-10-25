@@ -31,3 +31,24 @@ p4matrix,--subtract --depth 2 --osd 2 --snr-mode 2 --sub-top 6,1,2,991,34,76.3,9
 p4matrix,--subtract --depth 2 --osd 3 --snr-mode 2 --sub-top 10,1,2,1013,36,78.0,123.2,129.8,138.3,119.17,15.0
 p4matrix,--subtract --depth 2 --osd 3 --snr-mode 2 --sub-top 16,1,2,1047,39,80.7,161.2,176.8,184.0,94.13,19.5
 p4matrix,--subtract --depth 3 --osd 2 --snr-mode 2,1,2,1062,43,81.8,209.5,228.1,272.7,73.47,25.3
+p4opt,--osd 0 --snr-mode 2,1,2,942,26,72.6,15.7,16.2,17.1,869.57,1.9
+p4opt,--osd 2 --snr-mode 2,1,2,956,28,73.7,17.9,18.5,19.6,774.03,2.2
+p4opt,--osd 3 --snr-mode 2 --time-osr 3,1,2,969,35,74.7,20.4,20.6,22.9,688.41,2.5
+p4opt,--osd 3 --snr-mode 2 --time-osr 4,1,2,975,36,75.1,22.0,21.7,25.2,642.29,2.7
+p4opt,--osd 3 --snr-mode 2 --time-osr 4 --candidates 300,1,2,981,37,75.6,35.4,36.9,40.4,401.62,4.3
+p4opt,--subtract --depth 2 --osd 2 --snr-mode 2 --sub-top 6,1,2,991,34,76.3,88.6,91.8,95.6,162.10,10.9
+p4opt,--subtract --depth 2 --osd 3 --snr-mode 2 --sub-top 10,1,2,1013,36,78.0,117.4,124.2,128.1,125.05,14.2
+p4opt,--subtract --depth 2 --osd 3 --snr-mode 2 --sub-top 16,1,2,1047,39,80.7,164.0,173.5,202.3,92.52,20.8
+p4opt,--subtract --depth 3 --osd 2 --snr-mode 2,1,2,1062,43,81.8,203.2,220.4,263.9,75.74,24.5
+p4opt,--osd 3 --snr-mode 2 --time-osr 4 --candidates 200,1,2,978,36,75.3,27.2,27.7,30.6,521.10,3.3
+pairfast,--subtract --depth 3 --osd 2 --fast-snr,1,2,1062,43,81.8,193.1,208.1,253.3,79.71,23.3
+pairfast,--subtract --depth 2 --osd 3 --fast-snr --sub-top 16,1,2,1047,39,80.7,150.3,165.4,170.9,100.96,18.2
+pairfast,--osd 0 --fast-snr,1,2,942,26,72.6,12.4,12.8,13.7,1100.98,1.5
+pairfast,--osd 2 --fast-snr,1,2,956,28,73.7,14.4,14.9,16.1,962.16,1.8
+pairfast,--osd 3 --fast-snr --time-osr 3,1,2,969,35,74.7,17.0,17.1,20.4,826.09,2.1
+pairfast,--osd 3 --fast-snr --time-osr 4,1,2,975,36,75.1,18.4,18.0,21.5,767.96,2.2
+pairfast,--osd 3 --fast-snr --time-osr 4 --candidates 300,1,2,981,37,75.6,31.4,32.7,35.3,452.78,3.8
+pairfast,--subtract --depth 2 --osd 2 --fast-snr --sub-top 6,1,2,991,34,76.3,82.0,85.4,88.7,175.15,9.9
+pairfast,--subtract --depth 2 --osd 3 --fast-snr --sub-top 10,1,2,1013,36,78.0,113.0,119.4,125.5,129.92,13.7
+pairfast,--subtract --depth 2 --osd 3 --fast-snr --sub-top 16,1,2,1047,39,80.7,150.7,166.9,171.6,100.69,18.2
+pairfast,--subtract --depth 3 --osd 2 --fast-snr,1,2,1062,43,81.8,194.9,210.1,255.4,78.97,23.5
