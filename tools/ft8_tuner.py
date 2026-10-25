@@ -10,8 +10,10 @@
   - 三套内置预设：fast（snr_mode=1）、精确（snr_mode=2）、高召回（depth=3 + snr_mode=2）。
 
 用法：
-    python tools/ft8_tuner.py
-    python tools/ft8_tuner.py --exe native/build-clang/ft8_cli.exe --data test
+    在仓库根目录： python tools/ft8_tuner.py
+    在 tools 目录： python ft8_tuner.py
+    任意目录：     tools\\run_tuner.bat
+    可选参数：     --exe native/build-clang/ft8_cli.exe --data test
 
 说明：
   - 计时为 ft8_cli bench 的墙钟时间；要得到 CPU 效率请把线程数设为 1。

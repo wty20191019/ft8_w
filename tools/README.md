@@ -5,11 +5,25 @@
 
 ## 启动
 
+在**仓库根目录**：
+
 ```bash
 python tools/ft8_tuner.py
 ```
 
-Windows 下也可以直接双击 `tools/run_tuner.bat`。
+在 **tools 目录内**（注意不要写成 `tools/ft8_tuner.py`）：
+
+```bash
+python ft8_tuner.py
+```
+
+任意目录都可以直接运行/双击：
+
+```bat
+D:\Desktop\ft8_w\tools\run_tuner.bat
+```
+
+Windows 下也可以直接双击 `tools/run_tuner.bat`（内部使用绝对路径，不依赖当前目录）。
 
 依赖：Python 3.10+（标准库 Tkinter），无需安装第三方包。
 
