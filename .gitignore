@@ -12,3 +12,10 @@
 # 宿主 CMake/Ninja 默认构建目录
 /native/build/
 /.idea/
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 调参台运行日志（CSV 记录保留）
+/test_results/ui_logs/
