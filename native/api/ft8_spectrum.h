@@ -63,6 +63,33 @@ float ft8_spectrum_snr(const float* samples, int num_samples, int sample_rate,
                        const float* sbase, int nbin);
 
 /**
+ * P4：WSJT-X 同源「下变频 + 抽取」SNR 上下文。
+ *
+ * 创建时对整时隙做一次长 FFT（df=1/16 Hz）；之后每条命中只做一次
+ * 3200 点 IFFT（→200 Hz 复基带）与 79 次 32 点 FFT。同一遍解码的所有命中
+ * 共享该上下文。与 `ft8_spectrum_snr()` 的数学口径相同（Σ正确音调功率 −
+ * 频谱噪声底），但单条成本从约 9.5 ms 降到 0.1 ms 量级。
+ */
+typedef struct ft8_spectrum_decim ft8_spectrum_decim_t;
+
+ft8_spectrum_decim_t* ft8_spectrum_decim_create(const float* samples, int num_samples,
+                                                int sample_rate);
+void ft8_spectrum_decim_free(ft8_spectrum_decim_t* d);
+
+/**
+ * 用抽取后的 200 Hz 复基带估计一条命中的原始 SNR 指标（未做对外标定）。
+ *
+ * @param d      由 ft8_spectrum_decim_create() 创建
+ * @param tones  79 个发端音调（含 Costas 段）
+ * @param freq0  音调 0 的音频频率 (Hz)
+ * @param dt     消息起点相对时隙起点的时间偏移 (s)
+ * @param sbase  频谱噪声底；NULL 时返回 Σsig 的绝对 dB
+ * @return 原始 SNR 指标；失败返回 0
+ */
+float ft8_spectrum_snr_decim(ft8_spectrum_decim_t* d, const uint8_t* tones,
+                             float freq0, float dt, const float* sbase, int nbin);
+
+/**
  * P2.3：为**尚未解码**的候选重算 174 个时域精化 LLR（供 BP 失败后重试）。
  *
  * 与 `ft8_spectrum_snr` 不同，解码前不知道数据音调，故对齐只能用**已知的

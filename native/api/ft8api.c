@@ -54,6 +54,13 @@
 #define FT8_SNR_FAST_SLOPE        1.223f
 #define FT8_SNR_FAST_INTERCEPT    (-27.4176f)
 
+/* P4 抽取 SNR 标定：snr_mode==2 时为「下变频 + 3200 点 IFFT + 32 点 FFT」的
+ * z = 10log10(Σsig) - sbase。因抽取/FFT 归一化与全速率 Goertzel 不同，需单独
+ * 标定：test/ 全量 981 条命中对 WSJT-X 参考回归 ref = 0.818424*z - 130.0468，
+ * MAE 3.27 dB、R²=0.812（全速率模式为 3.32 dB / 0.791）。 */
+#define FT8_SNR_DECIM_SLOPE       0.818424f
+#define FT8_SNR_DECIM_INTERCEPT   (-130.0468f)
+
 /* 最近一次错误信息（简单全局，解码通常单调用者） */
 static char s_last_error[256];
 
@@ -659,7 +666,8 @@ static int decode_pass(const monitor_t* mon, const float* samples, int num_sampl
              * P4：snr_mode==1 时跳过全部高精度 SNR 计算（噪声底 + 逐命中
              * 时域 Goertzel），直接复用瀑布域 snr_order。解码文本不变。 */
             float* sbase = NULL;
-            if (cfg->snr_mode == 0 && num_hits > 0 &&
+            const int nh = (num_hits < max_out) ? num_hits : max_out;
+            if (cfg->snr_mode != 1 && num_hits > 0 &&
                 samples && num_samples > 0 && sample_rate > 0)
             {
                 sbase = (float*)malloc((size_t)FT8_SP_BASE_NBIN * sizeof(float));
@@ -671,16 +679,47 @@ static int decode_pass(const monitor_t* mon, const float* samples, int num_sampl
                 }
             }
 
-            if (cfg->snr_mode != 0)
+            if (cfg->snr_mode == 2)
             {
-                for (int k = 0; k < num_hits; ++k)
+                /* WSJT-X 同源：一遍内共享长 FFT，每命中只做抽取 + 32 点 FFT */
+                ft8_spectrum_decim_t* dec = (nh > 0)
+                                                ? ft8_spectrum_decim_create(samples, num_samples,
+                                                                            sample_rate)
+                                                : NULL;
+                if (dec)
+                {
+                    /* 只算去重后实际保留的命中（与模式 0 一致）；若要求返回重复项，
+                     * 则所有命中都要算，避免重复项 SNR 被截断到下限。 */
+                    const int use_uniq = (!cfg->return_duplicates && pass_seen && uniq && nuniq > 0);
+                    const int nsnr = use_uniq ? nuniq : nh;
+                    uint8_t dec_tones[FT8_NN];
+                    for (int j = 0; j < nsnr; ++j)
+                    {
+                        const int k = use_uniq ? uniq[j] : j;
+                        ft8_encode(out[k].message.payload, dec_tones);
+                        const float s = ft8_spectrum_snr_decim(dec, dec_tones, out[k].freq,
+                                                               out[k].time, sbase,
+                                                               FT8_SP_BASE_NBIN);
+                        out[k].snr_raw = (s != 0.0f) ? s : out[k].snr_order;
+                    }
+                    ft8_spectrum_decim_free(dec);
+                }
+                else
+                {
+                    for (int k = 0; k < nh; ++k)
+                        out[k].snr_raw = out[k].snr_order;
+                }
+            }
+            else if (cfg->snr_mode == 1)
+            {
+                for (int k = 0; k < nh; ++k)
                     out[k].snr_raw = out[k].snr_order;
             }
             else if (pass_seen && uniq)
                 compute_snr_batch(out, uniq, nuniq, samples, num_samples, sample_rate,
                                   num_threads, sbase, FT8_SP_BASE_NBIN);
             else
-                for (int k = 0; k < num_hits; ++k) /* 内存不足：退化为串行且不去重 */
+                for (int k = 0; k < nh; ++k) /* 内存不足：退化为串行且不去重 */
                     snr_batch_one(&out[k], samples, num_samples, sample_rate, sbase,
                                   FT8_SP_BASE_NBIN);
             free(sbase);
@@ -751,9 +790,14 @@ static void emit_hit(const pass_hit_t* h, int pass, int snr_mode, ft8_message_re
         snprintf(text, sizeof(text), "Error [%d] while unpacking!", (int)urc);
     snprintf(res->text, sizeof(res->text), "%s", text);
 
-    float snr = (snr_mode != 0)
-                    ? FT8_SNR_FAST_SLOPE * h->snr_raw + FT8_SNR_FAST_INTERCEPT
-                    : FT8_SNR_CALIB_SLOPE * h->snr_raw + FT8_SNR_CALIB_INTERCEPT;
+    float snr;
+    if (snr_mode == 1)
+        snr = FT8_SNR_FAST_SLOPE * h->snr_raw + FT8_SNR_FAST_INTERCEPT;
+    else if (snr_mode == 2)
+        snr = FT8_SNR_DECIM_SLOPE * h->snr_raw + FT8_SNR_DECIM_INTERCEPT;
+    else
+        snr = FT8_SNR_CALIB_SLOPE * h->snr_raw + FT8_SNR_CALIB_INTERCEPT;
+
     if (snr < -24.0f)
         snr = -24.0f; /* 与 JTDX 一致的显示下限 */
     if (snr > 49.0f)

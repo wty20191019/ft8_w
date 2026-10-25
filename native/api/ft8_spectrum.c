@@ -421,6 +421,213 @@ float ft8_spectrum_snr(const float* samples, int num_samples, int sample_rate,
 #endif
 }
 
+/* ---- P4：WSJT-X 同源「下变频 + 抽取」SNR ------------------------------ *
+ * 与 ft8_spectrum_snr() 的区别：不再在全采样率上做 8 音调 Goertzel，而是
+ *   1) 对整时隙做一次长 FFT（df = 1/16 Hz，nfft = fs*16）；
+ *   2) 每命中只截取 f0 附近 ±(1.5~8.5 音调) 的 1000 个频点，加边缘 taper 后
+ *      做 3200 点 IFFT → 200 Hz 复基带（32 样本/符号）；
+ *   3) 用 Costas 音调在 ±16 样本内精化起点；
+ *   4) 每符号做 32 点 FFT，取 8 音调功率，累加正确音调功率后减噪声底。
+ *
+ * 数学口径与全速率实现一致（Σ正确音调功率 / 频谱噪声底），但每符号计算量
+ * 从 8×1920 降到 32 点 FFT，长 FFT 又可在同一遍的所有命中间复用。
+ * 思路参考 WSJT-X `ft8_downsample.f90` / `ft8b.f90`，代码自研（MIT）。 */
+
+#define FT8_SP_DECIM_NFFT2  3200 /* 200 Hz 下 16 s */
+#define FT8_SP_DECIM_NSPS   32   /* 每符号样本数（200 Hz） */
+#define FT8_SP_DECIM_FS2    200.0
+#define FT8_SP_DECIM_TAPER  101  /* 频带两端半余弦 taper 长度（bin） */
+#define FT8_SP_DECIM_TONE   6.25 /* 音调间隔 (Hz) */
+
+struct ft8_spectrum_decim
+{
+    int sample_rate;
+    int nfft1;
+    kiss_fftr_cfg fr;
+    kiss_fft_cfg fi;  /* 3200 点复 IFFT */
+    kiss_fft_cfg f32; /* 32 点复 FFT */
+    kiss_fft_cpx* spec;
+    kiss_fft_cpx* bins;
+    kiss_fft_cpx* cd;
+    kiss_fft_cpx* sym;
+    float* pad;
+};
+
+static float sp_decim_taper(int j, int k)
+{
+    if (j < FT8_SP_DECIM_TAPER)
+        return 0.5f * (1.0f + cosf((float)(FT8_SP_DECIM_TAPER - 1 - j) *
+                                  (float)M_PI / (float)(FT8_SP_DECIM_TAPER - 1)));
+    if (j >= k - FT8_SP_DECIM_TAPER)
+        return 0.5f * (1.0f + cosf((float)(j - (k - FT8_SP_DECIM_TAPER)) *
+                                  (float)M_PI / (float)(FT8_SP_DECIM_TAPER - 1)));
+    return 1.0f;
+}
+
+ft8_spectrum_decim_t* ft8_spectrum_decim_create(const float* samples, int num_samples,
+                                                int sample_rate)
+{
+    if (!samples || num_samples <= 0 || sample_rate <= 0)
+        return NULL;
+
+    /* 抽取后 200 Hz、16 s 缓冲：nfft1 = fs*16 → df = 1/16 Hz，
+     * 3200 个 bin 恰好覆盖 200 Hz。FT8 时隙最长 15 s，超出部分自然截断。 */
+    int nfft1 = sample_rate * 16;
+
+    ft8_spectrum_decim_t* d = (ft8_spectrum_decim_t*)calloc(1, sizeof(*d));
+    if (!d)
+        return NULL;
+    d->sample_rate = sample_rate;
+    d->nfft1 = nfft1;
+    d->pad = (float*)calloc((size_t)nfft1, sizeof(float));
+    d->spec = (kiss_fft_cpx*)calloc((size_t)(nfft1 / 2 + 1), sizeof(kiss_fft_cpx));
+    d->bins = (kiss_fft_cpx*)calloc(FT8_SP_DECIM_NFFT2, sizeof(kiss_fft_cpx));
+    d->cd = (kiss_fft_cpx*)calloc(FT8_SP_DECIM_NFFT2, sizeof(kiss_fft_cpx));
+    d->sym = (kiss_fft_cpx*)calloc(32, sizeof(kiss_fft_cpx));
+    d->fr = kiss_fftr_alloc(nfft1, 0, NULL, NULL);
+    d->fi = kiss_fft_alloc(FT8_SP_DECIM_NFFT2, 1, NULL, NULL);
+    d->f32 = kiss_fft_alloc(32, 0, NULL, NULL);
+
+    if (!d->pad || !d->spec || !d->bins || !d->cd || !d->sym || !d->fr || !d->fi || !d->f32)
+    {
+        ft8_spectrum_decim_free(d);
+        return NULL;
+    }
+
+    memcpy(d->pad, samples, (size_t)((num_samples < nfft1) ? num_samples : nfft1) * sizeof(float));
+    kiss_fftr(d->fr, d->pad, d->spec);
+    return d;
+}
+
+void ft8_spectrum_decim_free(ft8_spectrum_decim_t* d)
+{
+    if (!d)
+        return;
+    if (d->fr)
+        kiss_fftr_free(d->fr);
+    if (d->fi)
+        kiss_fft_free(d->fi);
+    if (d->f32)
+        kiss_fft_free(d->f32);
+    free(d->pad);
+    free(d->spec);
+    free(d->bins);
+    free(d->cd);
+    free(d->sym);
+    free(d);
+}
+
+/* 用 Costas 音调在 200 Hz 基带上评估起点 n0 的同步功率。
+ * ct/st 为 32 点单位圆表（ct[k]=cos(2πk/32)，st[k]=sin(2πk/32)），
+ * 避免在内层逐样本调用三角函数。 */
+static double sp_decim_sync_score(const kiss_fft_cpx* cd, int n0,
+                                  const double* ct, const double* st)
+{
+    double score = 0.0;
+    for (int g = 0; g < FT8_NUM_SYNC; ++g)
+    {
+        for (int k = 0; k < FT8_LENGTH_SYNC; ++k)
+        {
+            const int tone = kFT8_Costas_pattern[k];
+            const int base = n0 + (g * 36 + k) * FT8_SP_DECIM_NSPS;
+            if (base < 0 || base + FT8_SP_DECIM_NSPS > FT8_SP_DECIM_NFFT2)
+                continue;
+            double sr = 0.0, si = 0.0;
+            for (int n = 0; n < FT8_SP_DECIM_NSPS; ++n)
+            {
+                /* (vr+j*vi) * e^{-j*2*pi*tone*n/32} */
+                const int idx = (tone * n) & 31;
+                const double c = ct[idx], s = st[idx];
+                const kiss_fft_cpx v = cd[base + n];
+                sr += (double)v.r * c + (double)v.i * s;
+                si += (double)v.i * c - (double)v.r * s;
+            }
+            score += sr * sr + si * si;
+        }
+    }
+    return score;
+}
+
+float ft8_spectrum_snr_decim(ft8_spectrum_decim_t* d, const uint8_t* tones,
+                             float freq0, float dt, const float* sbase, int nbin)
+{
+    if (!d || !tones || !(freq0 > 0.0f))
+        return 0.0f;
+
+    const double df1 = (double)d->sample_rate / (double)d->nfft1;
+    const int i0 = (int)lround((double)freq0 / df1);
+    const int ib = (int)lround(((double)freq0 - 1.5 * FT8_SP_DECIM_TONE) / df1) - i0;
+    const int it = (int)lround(((double)freq0 + 8.5 * FT8_SP_DECIM_TONE) / df1) - i0;
+    const int kbin = it - ib + 1;
+    if (kbin <= 2 * FT8_SP_DECIM_TAPER || kbin > FT8_SP_DECIM_NFFT2)
+        return 0.0f;
+
+    memset(d->bins, 0, (size_t)FT8_SP_DECIM_NFFT2 * sizeof(kiss_fft_cpx));
+    for (int j = 0; j < kbin; ++j)
+    {
+        const int src = i0 + ib + j;
+        if (src < 0 || src > d->nfft1 / 2)
+            continue;
+        const int dst = ((ib + j) % FT8_SP_DECIM_NFFT2 + FT8_SP_DECIM_NFFT2) % FT8_SP_DECIM_NFFT2;
+        const float w = sp_decim_taper(j, kbin);
+        d->bins[dst].r = d->spec[src].r * w;
+        d->bins[dst].i = d->spec[src].i * w;
+    }
+    kiss_fft(d->fi, d->bins, d->cd);
+
+    /* 时间精化：瀑布候选的 dt 量化误差最大约 ±1/(2*time_osr) 符号，
+     * 在 ±16 样本（±80 ms）内按 Costas 功率找峰。 */
+    double ct[32], st[32];
+    for (int k = 0; k < 32; ++k)
+    {
+        const double ph = 2.0 * M_PI * (double)k / 32.0;
+        ct[k] = cos(ph);
+        st[k] = sin(ph);
+    }
+    int n0 = (int)lround((double)dt * FT8_SP_DECIM_FS2);
+    int best_n0 = n0;
+    double best = -1.0;
+    for (int sh = -16; sh <= 16; ++sh)
+    {
+        const double s = sp_decim_sync_score(d->cd, n0 + sh, ct, st);
+        if (s > best)
+        {
+            best = s;
+            best_n0 = n0 + sh;
+        }
+    }
+    n0 = best_n0;
+
+    double sum_sig = 0.0;
+    for (int sym = 0; sym < FT8_NN; ++sym)
+    {
+        const int base = n0 + sym * FT8_SP_DECIM_NSPS;
+        if (base < 0 || base + FT8_SP_DECIM_NSPS > FT8_SP_DECIM_NFFT2)
+            continue;
+        for (int n = 0; n < FT8_SP_DECIM_NSPS; ++n)
+            d->sym[n] = d->cd[base + n];
+        kiss_fft(d->f32, d->sym, d->sym);
+        const kiss_fft_cpx v = d->sym[tones[sym] & 7];
+        sum_sig += (double)v.r * (double)v.r + (double)v.i * (double)v.i;
+    }
+
+    if (!(sum_sig > 0.0))
+        return 0.0f;
+
+    const double sig10 = 10.0 * log10(sum_sig);
+    if (sbase && nbin > 0)
+    {
+        const double dfb = (double)d->sample_rate / 3840.0; /* 噪声底 3.125 Hz 网格 */
+        int bin = (int)lround((double)freq0 / dfb);
+        if (bin < 0)
+            bin = 0;
+        if (bin >= nbin)
+            bin = nbin - 1;
+        return (float)(sig10 - (double)sbase[bin]);
+    }
+    return (float)sig10;
+}
+
 /* ---- P2.3：解码前时域精化 LLR ---------------------------------------- *
  * BP 失败候选不知道数据音调，故只能用**已知的 Costas 同步音调**做小范围
  * 时间/频率精化；随后在精化位置上对 58 个数据符号做 1 符号窗 8 音调

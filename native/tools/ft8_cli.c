@@ -21,6 +21,7 @@
  *   --depth N       多遍消除遍数（默认 3）
  *   --osd N         OSD 兜底译码阶数（默认 2，0=关闭）
  *   --fast-snr      跳过时域高精度 SNR，仅用瀑布域快速口径（解码结果不变）
+ *   --snr-mode N    SNR 模式：0=全速率 Goertzel，1=瀑布域快速，2=抽取+32点FFT
  *   --sub-top N     每遍最多消除最强 N 条信号（0=全部，控制相减成本）
  */
 #include "ft8api.h"
@@ -140,6 +141,8 @@ static bool parse_option(int argc, char** argv, int* i, options_t* o)
         o->dec.snr_mode = 1;
         return true;
     }
+    if (strcmp(a, "--snr-mode") == 0)
+        return next_int(argc, argv, i, &o->dec.snr_mode);
     if (strcmp(a, "--sub-top") == 0)
         return next_int(argc, argv, i, &o->dec.subtract_max_signals);
     return false;
