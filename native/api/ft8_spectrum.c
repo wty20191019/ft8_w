@@ -591,33 +591,29 @@ void ft8_spectrum_decim_free(ft8_spectrum_decim_t* d)
     free(d);
 }
 
-/* 用 Costas 音调在 200 Hz 基带上评估起点 n0 的同步功率。
- * ct/st 为 32 点单位圆表（ct[k]=cos(2πk/32)，st[k]=sin(2πk/32)），
- * 避免在内层逐样本调用三角函数。 */
-static double sp_decim_sync_score(const kiss_fft_cpx* cd, int n0,
+/* 用全部 79 个已知音调在 200 Hz 基带上评估起点 n0 的功率。
+ * 解码成功后音调已知，全部符号参与相关比只用 21 个 Costas 符号更稳，
+ * 弱信号下不易被噪声峰误导。ct/st 为 32 点单位圆表。 */
+static double sp_decim_tone_score(const kiss_fft_cpx* cd, int n0, const uint8_t* tones,
                                   const double* ct, const double* st)
 {
     double score = 0.0;
-    for (int g = 0; g < FT8_NUM_SYNC; ++g)
+    for (int sym = 0; sym < FT8_NN; ++sym)
     {
-        for (int k = 0; k < FT8_LENGTH_SYNC; ++k)
+        const int base = n0 + sym * FT8_SP_DECIM_NSPS;
+        if (base < 0 || base + FT8_SP_DECIM_NSPS > FT8_SP_DECIM_NFFT2)
+            continue;
+        const int tone = tones[sym] & 7;
+        double sr = 0.0, si = 0.0;
+        for (int n = 0; n < FT8_SP_DECIM_NSPS; ++n)
         {
-            const int tone = kFT8_Costas_pattern[k];
-            const int base = n0 + (g * 36 + k) * FT8_SP_DECIM_NSPS;
-            if (base < 0 || base + FT8_SP_DECIM_NSPS > FT8_SP_DECIM_NFFT2)
-                continue;
-            double sr = 0.0, si = 0.0;
-            for (int n = 0; n < FT8_SP_DECIM_NSPS; ++n)
-            {
-                /* (vr+j*vi) * e^{-j*2*pi*tone*n/32} */
-                const int idx = (tone * n) & 31;
-                const double c = ct[idx], s = st[idx];
-                const kiss_fft_cpx v = cd[base + n];
-                sr += (double)v.r * c + (double)v.i * s;
-                si += (double)v.i * c - (double)v.r * s;
-            }
-            score += sr * sr + si * si;
+            const int idx = (tone * n) & 31;
+            const double c = ct[idx], s = st[idx];
+            const kiss_fft_cpx v = cd[base + n];
+            sr += (double)v.r * c + (double)v.i * s;
+            si += (double)v.i * c - (double)v.r * s;
         }
+        score += sr * sr + si * si;
     }
     return score;
 }
@@ -649,8 +645,9 @@ float ft8_spectrum_snr_decim(ft8_spectrum_decim_t* d, const uint8_t* tones,
     }
     kiss_fft(d->plan->fi, d->bins, d->cd);
 
-    /* 时间精化：瀑布候选的 dt 量化误差最大约 ±1/(2*time_osr) 符号，
-     * 在 ±16 样本（±80 ms）内按 Costas 功率找峰。 */
+    /* 时间精化：瀑布候选的 dt 量化误差最大约 ±1/(2*time_osr) 符号。
+     * 解码后 79 个音调已知，先用全部音调在 ±16 样本内步长 2 粗搜，
+     * 再在粗峰 ±1 样本内细搜；比只用 Costas 更稳，成本约为全步长的 60%。 */
     double ct[32], st[32];
     for (int k = 0; k < 32; ++k)
     {
@@ -659,18 +656,29 @@ float ft8_spectrum_snr_decim(ft8_spectrum_decim_t* d, const uint8_t* tones,
         st[k] = sin(ph);
     }
     int n0 = (int)lround((double)dt * FT8_SP_DECIM_FS2);
-    int best_n0 = n0;
+    int coarse = n0;
     double best = -1.0;
-    for (int sh = -16; sh <= 16; ++sh)
+    for (int sh = -16; sh <= 16; sh += 2)
     {
-        const double s = sp_decim_sync_score(d->cd, n0 + sh, ct, st);
+        const double s = sp_decim_tone_score(d->cd, n0 + sh, tones, ct, st);
         if (s > best)
         {
             best = s;
-            best_n0 = n0 + sh;
+            coarse = n0 + sh;
         }
     }
-    n0 = best_n0;
+    int fine = coarse;
+    best = -1.0;
+    for (int sh = -1; sh <= 1; ++sh)
+    {
+        const double s = sp_decim_tone_score(d->cd, coarse + sh, tones, ct, st);
+        if (s > best)
+        {
+            best = s;
+            fine = coarse + sh;
+        }
+    }
+    n0 = fine;
 
     double sum_sig = 0.0;
     for (int sym = 0; sym < FT8_NN; ++sym)

@@ -56,10 +56,11 @@
 
 /* P4 抽取 SNR 标定：snr_mode==2 时为「下变频 + 3200 点 IFFT + 32 点 FFT」的
  * z = 10log10(Σsig) - sbase（sbase 用 47 段快速估计）。因抽取/FFT 归一化与
- * 全速率 Goertzel 不同，需单独标定：test/ 全量 981 条命中对 WSJT-X 参考回归
- * ref = 0.839005*z - 133.829，MAE 3.23 dB、R²=0.815（全速率模式 3.32 dB / 0.791）。 */
-#define FT8_SNR_DECIM_SLOPE       0.839005f
-#define FT8_SNR_DECIM_INTERCEPT   (-133.829f)
+ * 全速率 Goertzel 不同，需单独标定：test/ 全量去重 1073 条命中（默认配置 +
+ * 推荐配置并集）对 WSJT-X 参考回归 ref = 0.848139*z - 135.4601，
+ * 并集 MAE 3.00 dB、R²=0.831；推荐配置子集 MAE 3.11 / R² 0.824。 */
+#define FT8_SNR_DECIM_SLOPE       0.848139f
+#define FT8_SNR_DECIM_INTERCEPT   (-135.4601f)
 
 /* 最近一次错误信息（简单全局，解码通常单调用者） */
 static char s_last_error[256];

@@ -52,3 +52,16 @@ pairfast,--subtract --depth 2 --osd 2 --fast-snr --sub-top 6,1,2,991,34,76.3,82.
 pairfast,--subtract --depth 2 --osd 3 --fast-snr --sub-top 10,1,2,1013,36,78.0,113.0,119.4,125.5,129.92,13.7
 pairfast,--subtract --depth 2 --osd 3 --fast-snr --sub-top 16,1,2,1047,39,80.7,150.7,166.9,171.6,100.69,18.2
 pairfast,--subtract --depth 3 --osd 2 --fast-snr,1,2,1062,43,81.8,194.9,210.1,255.4,78.97,23.5
+compare,--subtract --depth 3 --osd 2,1,2,1062,43,81.8,356.5,388.6,481.6,43.17,43.0
+compare,--subtract --depth 3 --osd 2 --snr-mode 2,1,2,1062,43,81.8,212.2,229.1,286.2,72.53,25.7
+compare,--osd 3 --time-osr 4 --candidates 300,1,2,981,37,75.6,182.5,201.1,231.9,77.90,22.0
+compare,--osd 3 --time-osr 4 --candidates 300 --snr-mode 2,1,2,981,37,75.6,34.7,36.3,38.6,409.72,4.2
+p4final,--osd 0 --snr-mode 2,1,2,942,26,72.6,16.8,17.4,18.1,812.63,2.1
+p4final,--osd 2 --snr-mode 2,1,2,956,28,73.7,18.8,19.5,20.6,736.97,2.3
+p4final,--osd 3 --snr-mode 2 --time-osr 3,1,2,969,35,74.7,21.1,21.3,23.3,665.57,2.6
+p4final,--osd 3 --snr-mode 2 --time-osr 4,1,2,975,36,75.1,22.5,22.5,25.4,628.02,2.7
+p4final,--osd 3 --snr-mode 2 --time-osr 4 --candidates 300,1,2,981,37,75.6,36.0,37.7,40.3,394.93,4.4
+p4final,--subtract --depth 2 --osd 2 --snr-mode 2 --sub-top 6,1,2,991,34,76.3,89.2,92.4,96.7,161.01,10.8
+p4final,--subtract --depth 2 --osd 3 --snr-mode 2 --sub-top 10,1,2,1013,36,78.0,118.7,125.5,130.9,123.68,14.3
+p4final,--subtract --depth 2 --osd 3 --snr-mode 2 --sub-top 16,1,2,1047,39,80.7,162.6,173.4,200.5,93.32,20.6
+p4final,--subtract --depth 3 --osd 2 --snr-mode 2,1,2,1062,43,81.8,201.4,218.0,263.0,76.42,24.3
