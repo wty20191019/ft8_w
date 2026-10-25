@@ -17,13 +17,13 @@
      --osd 3 --time-osr 4 --candidates 300 --snr-mode 2
    ```
 
-   → **75.6%**（981/1298），extra 37（2.9%），avg 38.0 ms / P95 43.6 ms，
-   374 hits/CPU-s；SNR 对 WSJT-X 参考 **MAE 3.22 dB、R²=0.817**（优于原精确模式）。
+   → **75.6%**（981/1298），extra 37（2.9%），avg 37.0 ms / P95 41.2 ms，
+   384 hits/CPU-s；SNR 对 WSJT-X 参考 **MAE 3.22 dB、R²=0.817**（优于原精确模式）。
 
 3. 相比现默认配置（`--subtract --depth 3 --osd 2`，81.8% / 371.7 ms / 42 hits/CPU-s），
-   推荐配置的**单位 CPU 时间召回提升约 8.8 倍**，代价是召回下降 6.2 个百分点。
+   推荐配置的**单位 CPU 时间召回提升约 9.1 倍**，代价是召回下降 6.2 个百分点。
 4. 若必须保留 80%+ 召回，`--subtract --depth 3 --osd 2 --snr-mode 2`
-   仍为 **81.8%**，耗时从 371.7 ms 降到 **209.3 ms**（同精度下快 1.8 倍）。
+   仍为 **81.8%**，耗时从 371.7 ms 降到 **209.5 ms**（同精度下快 1.8 倍）。
 5. **关键发现：SNR 的 149 ms 开销来自「全采样率 Goertzel」，不是译码。**
    `snr_mode=2` 按 WSJT-X 的结构先下变频抽取到 200 Hz（32 样本/符号），再做
    32 点 FFT：每命中从 9.5 ms 降到 **0.05 ms**，整时隙约 5 ms，
@@ -70,17 +70,17 @@
 | fast | `--osd 3 --fast-snr --time-osr 4 --candidates 100` | 961 | 30 | 74.0% | 15.9 ms | 18.3 ms | 876 |
 | fast | `--osd 3 --fast-snr --time-osr 3` | 969 | 35 | 74.7% | 17.3 ms | 19.9 ms | 812 |
 | fast | `--osd 3 --fast-snr --time-osr 4` | 975 | 36 | 75.1% | 19.4 ms | 23.3 ms | 728 |
-| **mode2** | `--osd 3 --snr-mode 2 --time-osr 3` | 969 | 35 | 74.7% | 22.5 ms | 24.8 ms | 624 |
-| **mode2** | `--osd 3 --snr-mode 2 --time-osr 4` | 975 | 36 | 75.1% | 24.2 ms | 27.2 ms | 584 |
+| **mode2** | `--osd 3 --snr-mode 2 --time-osr 3` | 969 | 35 | 74.7% | 23.5 ms | 26.4 ms | 598 |
+| **mode2** | `--osd 3 --snr-mode 2 --time-osr 4` | 975 | 36 | 75.1% | 23.8 ms | 26.9 ms | 594 |
 | **mode2** | `--osd 3 --snr-mode 2 --time-osr 4 --candidates 200` | 978 | 36 | 75.3% | 29.5 ms | 33.2 ms | 480 |
 | fast | `--osd 3 --fast-snr --time-osr 4 --candidates 300` | 981 | 37 | 75.6% | 32.2 ms | 36.2 ms | 442 |
-| **mode2** | **`--osd 3 --snr-mode 2 --time-osr 4 --candidates 300`** | **981** | **37** | **75.6%** | **38.0 ms** | **43.6 ms** | **374** |
+| **mode2** | **`--osd 3 --snr-mode 2 --time-osr 4 --candidates 300`** | **981** | **37** | **75.6%** | **37.0 ms** | **41.2 ms** | **384** |
 | fast | `--subtract --depth 2 --osd 2 --fast-snr --sub-top 6` | 991 | 34 | 76.3% | 84.1 ms | 90.1 ms | 171 |
 | fast | `--subtract --depth 2 --osd 3 --fast-snr --sub-top 8` | 1003 | 36 | 77.3% | 100.4 ms | 110.5 ms | 145 |
 | fast | `--subtract --depth 2 --osd 3 --fast-snr --sub-top 10` | 1013 | 36 | 78.0% | 114.7 ms | 126.7 ms | 128 |
 | fast | `--subtract --depth 2 --osd 3 --fast-snr --sub-top 16` | 1047 | 39 | 80.7% | 153.6 ms | 176.0 ms | 99 |
 | fast | `--subtract --depth 2 --osd 3 --fast-snr` | 1060 | 41 | 81.7% | 169.3 ms | 216.8 ms | 91 |
-| **mode2** | `--subtract --depth 3 --osd 2 --snr-mode 2` | 1062 | 43 | 81.8% | 209.3 ms | 272.1 ms | 74 |
+| **mode2** | `--subtract --depth 3 --osd 2 --snr-mode 2` | 1062 | 43 | 81.8% | 209.5 ms | 272.7 ms | 73 |
 | mode0 | `--subtract --depth 3 --osd 2`（现默认） | 1062 | 43 | 81.8% | 371.7 ms | 492.0 ms | 42 |
 
 ### SNR 精度（对 WSJT-X 参考，n≈1000）
@@ -100,7 +100,7 @@ ft8_cli bench test --threads 1 \
   --osd 3 --time-osr 4 --candidates 300 --snr-mode 2
 ```
 
-- 召回 **75.6%**（981/1298），extra 37（2.9%），avg 38.0 ms / P95 43.6 ms；
+- 召回 **75.6%**（981/1298），extra 37（2.9%），avg 37.0 ms / P95 41.2 ms；
 - SNR 精度优于原精确模式（MAE 3.22 vs 3.32 dB）；
 - 对应用户侧配置：`osd_depth=3, time_osr=4, max_candidates=300,
   snr_mode=2, enable_subtract=false`。
@@ -111,7 +111,7 @@ ft8_cli bench test --threads 1 \
 ft8_cli bench test --threads 1 --osd 3 --time-osr 4 --snr-mode 2
 ```
 
-- 召回 75.1%（975），extra 36，avg 24.2 ms / P95 27.2 ms，584 hits/CPU-s；
+- 召回 75.1%（975），extra 36，avg 23.8 ms / P95 26.9 ms，594 hits/CPU-s；
 - 若完全不需要 SNR 精度，可用 `--fast-snr` 进一步降到 19.4 ms。
 
 ### 4.3 必须保留 80%+ 召回
@@ -120,7 +120,7 @@ ft8_cli bench test --threads 1 --osd 3 --time-osr 4 --snr-mode 2
 ft8_cli bench test --threads 1 --subtract --depth 3 --osd 2 --snr-mode 2
 ```
 
-- 召回 81.8%（1062），extra 43，avg 209.3 ms / P95 272.1 ms；
+- 召回 81.8%（1062），extra 43，avg 209.5 ms / P95 272.7 ms；
 - 比现默认配置（模式 0）快 1.8 倍，SNR 精度不降反升。
 
 ## 5. 代码改动（默认行为不变）
@@ -158,3 +158,27 @@ python test_results/sweep_efficiency.py --tag <标签> --repeat 2 "<配置1>" "<
 - AP（`ap_mode`/`my_call`/`his_call`/`his_grid`）目前仅有配置字段、未实现译码逻辑，
   本次扫参未涉及。
 - 扫参数据为单次/两次重复的实测值，存在约 ±5% 的时延抖动；召回为确定性结果。
+
+## 8. 附：同一配置下模式 1 / 模式 2 实测对照
+
+把原表的 `--fast-snr` 全部替换为 `--snr-mode 2`，其余参数不变（`--repeat 2`）：
+
+| 配置（其余参数相同） | 召回 | extra | fast avg | **mode2 avg** | mode2 P95 | mode2 hits/CPU-s | 耗时增量 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `--osd 0` | 72.6% | 26 | 12.8 ms | **17.9 ms** | 19.5 ms | 763 | +5.1 ms |
+| `--osd 2` | 73.7% | 28 | 15.0 ms | **20.0 ms** | 21.7 ms | 693 | +5.0 ms |
+| `--osd 3 --time-osr 3` | 74.7% | 35 | 17.3 ms | **23.5 ms** | 26.4 ms | 598 | +6.2 ms |
+| `--osd 3 --time-osr 4` | 75.1% | 36 | 19.4 ms | **23.8 ms** | 26.9 ms | 594 | +4.4 ms |
+| `--osd 3 --time-osr 4 --candidates 300` | 75.6% | 37 | 32.2 ms | **37.0 ms** | 41.2 ms | 384 | +4.8 ms |
+| `--subtract --depth 2 --osd 2 --sub-top 6` | 76.3% | 34 | 84.1 ms | **93.2 ms** | 100.6 ms | 154 | +9.1 ms |
+| `--subtract --depth 2 --osd 3 --sub-top 10` | 78.0% | 36 | 114.7 ms | **123.2 ms** | 138.3 ms | 119 | +8.5 ms |
+| `--subtract --depth 2 --osd 3 --sub-top 16` | 80.7% | 39 | 153.6 ms | **161.2 ms** | 184.0 ms | 94 | +7.6 ms |
+| `--subtract --depth 3 --osd 2` | 81.8% | 43 | 204.7 ms | **209.5 ms** | 272.7 ms | 73 | +4.8 ms |
+
+结论：
+
+- 召回与 extra **逐项完全一致**（SNR 模式只影响上报字段）；
+- 单遍配置固定增加约 **5 ms**，多遍配置因每遍重建长 FFT / plan 增加约 **5–9 ms**；
+- 所有单遍配置换成模式 2 后仍远低于 60 ms（最高 41.2 ms P95）；
+- 新增的 5 ms 换来 SNR MAE 从 7.0 dB 降到 3.22 dB，接近原精确口径。
+
