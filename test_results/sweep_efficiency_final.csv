@@ -16,3 +16,9 @@ frontier,--subtract --depth 2 --osd 3 --fast-snr --sub-top 16,1,2,1047,39,80.7,1
 frontier,--subtract --depth 2 --osd 3 --fast-snr,1,2,1060,41,81.7,169.3,186.8,216.8,90.74,20.5
 precise,--osd 3 --time-osr 4 --candidates 300 --min-score 8,1,2,981,37,75.6,188.6,206.6,234.3,75.38,22.8
 final,--osd 3 --fast-snr --time-osr 4 --candidates 300,1,2,981,37,75.6,32.2,33.6,36.2,441.53,3.9
+p4,--subtract --depth 3 --osd 2 --snr-mode 2,1,2,1062,43,81.8,209.3,229.2,272.1,73.54,25.2
+p4,--osd 3 --time-osr 3 --snr-mode 2,1,2,969,35,74.7,22.5,22.7,24.8,624.15,2.7
+p4,--osd 3 --time-osr 4 --candidates 300 --snr-mode 2,1,2,981,37,75.6,38.0,39.4,43.6,374.14,4.6
+p4,--osd 3 --time-osr 4 --snr-mode 2,1,2,975,36,75.1,24.2,24.1,27.2,583.90,3.0
+p4,--osd 3 --time-osr 4 --candidates 200 --snr-mode 2,1,2,978,36,75.3,29.5,30.1,33.2,480.47,3.6
+p4,--subtract --depth 2 --osd 3 --sub-top 8 --snr-mode 2,1,1,1003,36,77.3,108.6,113.5,117.4,133.85,6.5
