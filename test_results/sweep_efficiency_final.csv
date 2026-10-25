@@ -1,0 +1,17 @@
+﻿tag,config,threads,repeat,hits,extra,recall_pct,avg_ms,p50_ms,p95_ms,hits_per_cpu_s,wall_s
+final,--subtract --depth 3 --osd 2,1,3,1062,43,81.8,363.2,395.7,489.2,42.38,65.7
+final,--osd 3 --fast-snr --time-osr 3,1,3,969,35,74.7,17.3,17.5,19.9,811.76,3.2
+final,--osd 3 --fast-snr --time-osr 4,1,3,975,36,75.1,19.4,19.1,23.3,728.37,3.6
+final,--osd 3 --fast-snr --time-osr 4 --candidates 300 --min-score 8,1,3,981,37,75.6,34.4,34.1,38.1,413.30,6.3
+final,--subtract --depth 2 --osd 3 --fast-snr --sub-top 8,1,3,1003,36,77.3,100.4,105.3,110.5,144.78,18.3
+final,--subtract --depth 3 --osd 2 --fast-snr,1,3,1062,43,81.8,204.7,223.9,269.5,75.19,37.3
+frontier,--osd 0 --fast-snr,1,2,942,26,72.6,12.8,13.2,14.2,1066.58,1.6
+frontier,--osd 2 --fast-snr,1,2,956,28,73.7,15.0,15.6,16.7,923.67,1.8
+frontier,--osd 3 --fast-snr --time-osr 4 --candidates 100,1,2,961,30,74.0,15.9,15.7,18.3,875.95,2.0
+frontier,--osd 3 --fast-snr --time-osr 4 --candidates 200,1,2,978,36,75.3,24.3,24.8,28.5,583.29,3.0
+frontier,--subtract --depth 2 --osd 2 --fast-snr --sub-top 2,1,2,968,32,74.6,52.6,53.8,56.6,266.71,6.4
+frontier,--subtract --depth 2 --osd 2 --fast-snr --sub-top 6,1,2,991,34,76.3,84.1,87.7,90.1,170.78,10.2
+frontier,--subtract --depth 2 --osd 3 --fast-snr --sub-top 10,1,2,1013,36,78.0,114.7,121.8,126.7,128.00,13.9
+frontier,--subtract --depth 2 --osd 3 --fast-snr --sub-top 16,1,2,1047,39,80.7,153.6,169.4,176.0,98.79,18.6
+frontier,--subtract --depth 2 --osd 3 --fast-snr,1,2,1060,41,81.7,169.3,186.8,216.8,90.74,20.5
+precise,--osd 3 --time-osr 4 --candidates 300 --min-score 8,1,2,981,37,75.6,188.6,206.6,234.3,75.38,22.8
