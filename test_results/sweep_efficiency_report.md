@@ -12,8 +12,8 @@
 1. **60 ms（单线程 P95）以内，召回上限约 75.6%**，无法进入 80% 区间。
 2. **最优性价比点在 17–35 ms**：
    - 最省 CPU：`--osd 3 --fast-snr --time-osr 3` → **74.7%**，17.3 ms，812 hits/CPU-s；
-   - 60 ms 内召回最高：`--osd 3 --fast-snr --time-osr 4 --candidates 300 --min-score 8`
-     → **75.6%**，34.4 ms（P95 38.1 ms），413 hits/CPU-s。
+   - 60 ms 内召回最高：`--osd 3 --fast-snr --time-osr 4 --candidates 300`
+     → **75.6%**，32.2 ms（P95 36.2 ms），442 hits/CPU-s。
 3. 相对现默认配置（`--subtract --depth 3 --osd 2`，81.8% / 363 ms / 42 hits/CPU-s），
    推荐配置的**单位 CPU 时间召回提升约 10 倍**，代价是召回下降 6.2 个百分点。
 4. 若必须保留 80%+ 召回，最低成本点是
@@ -48,7 +48,7 @@
 | `--osd 3 --fast-snr --time-osr 3` | 969 | 35 | 74.7% | 17.3 ms | 19.9 ms | 812 |
 | `--osd 3 --fast-snr --time-osr 4` | 975 | 36 | 75.1% | 19.4 ms | 23.3 ms | 728 |
 | `--osd 3 --fast-snr --time-osr 4 --candidates 200` | 978 | 36 | 75.3% | 24.3 ms | 28.5 ms | 583 |
-| **`--osd 3 --fast-snr --time-osr 4 --candidates 300 --min-score 8`** | **981** | **37** | **75.6%** | **34.4 ms** | **38.1 ms** | **413** |
+| **`--osd 3 --fast-snr --time-osr 4 --candidates 300`** | **981** | **37** | **75.6%** | **32.2 ms** | **36.2 ms** | **442** |
 | `--subtract --depth 2 --osd 2 --fast-snr --sub-top 6` | 991 | 34 | 76.3% | 84.1 ms | 90.1 ms | 171 |
 | `--subtract --depth 2 --osd 3 --fast-snr --sub-top 8` | 1003 | 36 | 77.3% | 100.4 ms | 110.5 ms | 145 |
 | `--subtract --depth 2 --osd 3 --fast-snr --sub-top 10` | 1013 | 36 | 78.0% | 114.7 ms | 126.7 ms | 128 |
@@ -66,13 +66,13 @@
 
 ```bash
 ft8_cli bench test --threads 1 \
-  --osd 3 --time-osr 4 --candidates 300 --min-score 8 --fast-snr
+  --osd 3 --time-osr 4 --candidates 300 --fast-snr
 ```
 
-- 召回 **75.6%**（981/1298），extra 37（2.8%），avg 34.4 ms / P95 38.1 ms；
-- 相比默认：单位 CPU 时间召回 ×9.8，召回 −6.2 pp；
-- 对应用户侧配置：`osd_depth=3, time_osr=4, max_candidates=300, min_sync_score=8,
-  snr_mode=1, enable_subtract=false`。
+- 召回 **75.6%**（981/1298），extra 37（2.8%），avg 32.2 ms / P95 36.2 ms；
+- 相比默认：单位 CPU 时间召回 ×10.4，召回 −6.2 pp；
+- 对应用户侧配置：`osd_depth=3, time_osr=4, max_candidates=300,
+  snr_mode=1, enable_subtract=false`（其余保持默认）。
 
 ### 4.2 更省 CPU（召回仅低 0.5 pp，耗时减半）
 
@@ -97,8 +97,8 @@ ft8_cli bench test --threads 1 \
 
 | 改动 | 字段 / 开关 | 默认 | 作用 |
 | --- | --- | --- | --- |
-| 快速 SNR | `snr_mode` / CLI `--fast-snr` / JNI `DC_SNR_MODE` | 0（精确） | 1=跳过噪声底与逐命中时域 SNR，直接复用瀑布域 `snr_order`；解码文本不变，SNR 精度下降（MAE≈7.0 dB，精确口径 3.3 dB） |
-| 限制消除条数 | `subtract_max_signals` / CLI `--sub-top N` / JNI `DC_SUBTRACT_MAX_SIGNALS` | 0（全部） | >0 时每遍只消除最强的 N 条，用于压缩多遍成本 |
+| 快速 SNR | `snr_mode` / CLI `--fast-snr` / JNI `DC_SNR_MODE`（下标 15） | 0（精确） | 1=跳过噪声底与逐命中时域 SNR，直接复用瀑布域 `snr_order`；解码文本不变，SNR 精度下降（MAE≈7.0 dB，精确口径 3.3 dB） |
+| 限制消除条数 | `subtract_max_signals` / CLI `--sub-top N` / JNI `DC_SUBTRACT_MAX_SIGNALS`（下标 16） | 0（全部） | >0 时每遍只消除最强的 N 条，用于压缩多遍成本 |
 
 - 两个字段均追加在 `ft8_decode_config_t` 末尾，旧 Kotlin 传短数组仍安全；
 - 默认值下全量回归与历史完全一致：**1062 命中 / 43 extra / 81.8% / R²=0.791**；

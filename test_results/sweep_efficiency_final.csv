@@ -15,3 +15,4 @@ frontier,--subtract --depth 2 --osd 3 --fast-snr --sub-top 10,1,2,1013,36,78.0,1
 frontier,--subtract --depth 2 --osd 3 --fast-snr --sub-top 16,1,2,1047,39,80.7,153.6,169.4,176.0,98.79,18.6
 frontier,--subtract --depth 2 --osd 3 --fast-snr,1,2,1060,41,81.7,169.3,186.8,216.8,90.74,20.5
 precise,--osd 3 --time-osr 4 --candidates 300 --min-score 8,1,2,981,37,75.6,188.6,206.6,234.3,75.38,22.8
+final,--osd 3 --fast-snr --time-osr 4 --candidates 300,1,2,981,37,75.6,32.2,33.6,36.2,441.53,3.9
